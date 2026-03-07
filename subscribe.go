@@ -24,7 +24,7 @@ func SubscribeTopic[T any](b *Bus, pattern string, handler Handler[T], opts ...S
 	return subscribeWithMatcher(b, matcher, nil, handler, opts...)
 }
 
-// SubscribeMatch registers a type-based subscription constrained by a predicate.
+// SubscribeMatch registers a type-based subscription constrained by a predicate filter.
 func SubscribeMatch[T any](b *Bus, match func(Event[T]) bool, handler Handler[T], opts ...SubscribeOption) (func(), error) {
 	if match == nil {
 		return nil, fmt.Errorf("%w: match predicate is nil", ErrInvalidOption)

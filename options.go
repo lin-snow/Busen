@@ -151,7 +151,9 @@ func Async() SubscribeOption {
 	})
 }
 
-// Sequential forces an async subscriber to run with one worker and preserve FIFO order.
+// Sequential is shorthand for single-worker async FIFO delivery.
+//
+// It enables async delivery and forces the subscriber to run with one worker.
 func Sequential() SubscribeOption {
 	return subscribeOptionFunc(func(cfg *subscribeConfig) error {
 		cfg.async = true
@@ -196,7 +198,7 @@ func WithOverflow(policy OverflowPolicy) SubscribeOption {
 	})
 }
 
-// WithFilter filters events before they reach the handler.
+// WithFilter applies a predicate filter before the handler runs.
 func WithFilter[T any](fn func(Event[T]) bool) SubscribeOption {
 	return subscribeOptionFunc(func(cfg *subscribeConfig) error {
 		if fn == nil {

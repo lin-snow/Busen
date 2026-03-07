@@ -1,20 +1,18 @@
 # Busen
 
-Busen is a modern, typed-first EventBus for Go.
+Busen is a small, typed, in-process EventBus for Go.
 
-It is designed around plain Go values, `context.Context`, functional options, and explicit concurrency semantics. Type-based subscriptions are the primary API, while topics and wildcards are available as routing metadata when needed.
+Use it for local application events with optional topic routing, bounded async
+delivery, and explicit concurrency semantics. It is designed for simple apps,
+not for durable or distributed messaging.
 
 ## Features
 
 - Typed subscriptions with `Subscribe[T]` and `Publish[T]`
-- Optional topic routing with `SubscribeTopic[T]`
-- Predicate-based filtering with `SubscribeMatch[T]` and `WithFilter`
-- Sync and async delivery modes
-- Bounded async queues with explicit backpressure policies
-- FIFO delivery for single-worker async subscribers
-- Per-subscriber keyed ordering for async handlers
-- Thin dispatch middleware for local composition
-- Lightweight runtime hooks for publish, error, panic, and drop events
+- Optional topic routing and predicate-based filtering
+- Sync and async delivery with bounded backpressure
+- Local ordering guarantees for single-worker or same-key async paths
+- Thin middleware and lightweight hooks
 - Graceful shutdown with `Close(ctx)`
 
 ## Install
@@ -22,23 +20,6 @@ It is designed around plain Go values, `context.Context`, functional options, an
 ```bash
 go get github.com/lin-snow/Busen
 ```
-
-## Development
-
-Common local commands are available through the `Makefile`:
-
-```bash
-make help
-make fmt
-make lint
-make vet
-make test
-make test-race
-make cover
-make check
-```
-
-The `lint` target bootstraps `golangci-lint` `v2.3.0` into `./.bin` with the current Go toolchain before running it. This avoids version skew with the Go version declared in `go.mod`.
 
 ## Quick Start
 
@@ -125,7 +106,7 @@ _, err = busen.Subscribe(bus, func(ctx context.Context, event busen.Event[UserCr
 ```
 
 If you also publish with `WithKey(...)`, async subscribers preserve ordering for
-events that share the same non-empty key within that subscriber.
+events that share the same non-empty ordering key within that subscriber.
 
 ```go
 _, err = busen.Subscribe(bus, func(ctx context.Context, event busen.Event[UserCreated]) error {
@@ -138,7 +119,7 @@ _ = busen.Publish(context.Background(), bus, UserCreated{ID: "2"}, busen.WithKey
 
 Notes:
 
-- key-based ordering only applies to async subscribers
+- ordering keys only apply to async subscribers
 - empty keys fall back to the regular non-keyed scheduling path
 - ordering is per subscriber and per key, not global
 
@@ -165,7 +146,7 @@ Middleware is intentionally limited:
 - it does not manage retries, metrics, tracing, or distributed concerns
 - it does not affect subscriber matching, topic routing, or async queue selection
 - changes to `Dispatch` are visible to later middleware and the final handler
-- hooks continue to report the original published metadata
+- hooks continue to observe the original published metadata
 
 If you prefer configuration at construction time, you can also use `WithMiddleware(...)`:
 
@@ -210,7 +191,7 @@ Hooks are notification points, not middleware:
 
 ## Performance
 
-Busen now includes repeatable benchmarks for the main hot paths:
+Busen includes repeatable benchmarks for the main hot paths:
 
 - `Publish[T]` with 1 / 10 / 100 subscribers
 - sync vs async sequential delivery
@@ -252,8 +233,8 @@ wildcard router match path. Direct wildcard matcher cost dropped to roughly
 - Type matching is exact. A subscription for one Go type does not receive another type automatically.
 - Busen does not guarantee global ordering.
 - FIFO is preserved only for a single async subscriber running with one worker.
-- For async subscribers with `WithParallelism(n > 1)`, events with the same non-empty key preserve order within that subscriber.
-- A middleware may rewrite dispatch metadata seen by later middleware and the handler, but routing, queue selection, and hooks still use the original published event.
+- For async subscribers with `WithParallelism(n > 1)`, events with the same non-empty ordering key preserve order within that subscriber.
+- Middleware may rewrite dispatch metadata seen by later middleware and the handler, but routing, queue selection, and hooks still use the original published event.
 - Sync handler errors are returned from `Publish`.
 - Async handler errors and panics do not flow back to `Publish`; surface them via `Hooks`.
 - Busen is meant for simple in-process application use. It is not a distributed event platform.
@@ -273,6 +254,23 @@ Busen is not the right tool when:
 - you need durability, replay, or cross-process delivery
 - you need built-in tracing, metrics, retries, or rate limiting frameworks
 - you need global ordering guarantees
+
+## Development
+
+Common local commands are available through the `Makefile`:
+
+```bash
+make help
+make fmt
+make lint
+make vet
+make test
+make test-race
+make cover
+make check
+```
+
+The `lint` target bootstraps `golangci-lint` `v2.3.0` into `./.bin` with the current Go toolchain before running it. This avoids version skew with the Go version declared in `go.mod`.
 
 ## Project Docs
 

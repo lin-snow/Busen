@@ -7,7 +7,7 @@ import (
 // Hooks observes publish and handler lifecycle events.
 //
 // Hooks are intentionally thin. They are not a full middleware pipeline and do
-// not change delivery semantics. They exist to surface important runtime events
+// not change delivery semantics. They exist to observe important runtime events
 // such as async failures, panics, and dropped events.
 type Hooks struct {
 	OnPublishStart func(PublishStart)

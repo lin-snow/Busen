@@ -9,6 +9,9 @@ import (
 	"github.com/lin-snow/Busen/internal/router"
 )
 
+// Benchmarks in this file focus on the main in-process hot paths:
+// publish fan-out, topic routing, hooks, middleware, and async keyed delivery.
+
 func BenchmarkPublishSync(b *testing.B) {
 	for _, subs := range []int{1, 10, 100} {
 		b.Run(fmt.Sprintf("subs_%d", subs), func(b *testing.B) {

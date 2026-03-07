@@ -28,7 +28,7 @@ type Dispatch struct {
 // Next is the continuation function used by Middleware.
 type Next func(context.Context, Dispatch) error
 
-// Middleware wraps a handler invocation in the same spirit as HTTP middleware.
+// Middleware wraps local handler dispatch in the same spirit as HTTP middleware.
 type Middleware func(Next) Next
 
 // Use registers global dispatch middleware.
