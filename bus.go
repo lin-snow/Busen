@@ -19,8 +19,12 @@ type Bus struct {
 
 	mu           sync.RWMutex
 	subs         map[reflect.Type]map[uint64]*subscription
+	subSnapshots map[reflect.Type][]*subscription
 	middlewareMu sync.RWMutex
 	middlewares  []Middleware
+	middleware   func(Next) Next
+
+	middlewareVersion atomic.Uint64
 
 	nextID atomic.Uint64
 }
@@ -45,6 +49,10 @@ type subscription struct {
 	gate     *intdispatch.Gate
 	stopOnce sync.Once
 	done     chan struct{}
+
+	dispatchMu      sync.Mutex
+	dispatchVersion uint64
+	dispatchHandler Next
 }
 
 type workItem struct {
@@ -69,11 +77,16 @@ func New(opts ...Option) *Bus {
 		hooks:       cfg.hooks,
 		gate:        intdispatch.NewGate(),
 		subs:        make(map[reflect.Type]map[uint64]*subscription),
+		subSnapshots: make(map[reflect.Type][]*subscription),
 		middlewares: append([]Middleware(nil), cfg.middlewares...),
+		middleware:  buildMiddlewareChain(cfg.middlewares),
 	}
 }
 
 // Close stops accepting new publishes and drains async subscribers.
+// If the provided context ends first, Close returns an error wrapping both
+// ErrCloseIncomplete and the context error. In that case, user handlers are not
+// forcefully canceled.
 func (b *Bus) Close(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -83,7 +96,7 @@ func (b *Bus) Close(ctx context.Context) error {
 
 	subs := b.allSubscriptions()
 	if err := b.gate.Wait(ctx); err != nil {
-		return err
+		return closeWaitError(err)
 	}
 
 	for _, sub := range subs {
@@ -93,7 +106,7 @@ func (b *Bus) Close(ctx context.Context) error {
 
 	for _, sub := range subs {
 		if err := sub.waitStopped(ctx); err != nil {
-			return err
+			return closeWaitError(err)
 		}
 	}
 
@@ -131,6 +144,7 @@ func (b *Bus) addSubscription(eventType reflect.Type, sub *subscription) error {
 		b.subs[eventType] = group
 	}
 	group[sub.id] = sub
+	b.subSnapshots[eventType] = snapshotGroup(group)
 	return nil
 }
 
@@ -146,23 +160,16 @@ func (b *Bus) removeSubscription(eventType reflect.Type, id uint64) {
 	delete(group, id)
 	if len(group) == 0 {
 		delete(b.subs, eventType)
+		delete(b.subSnapshots, eventType)
+		return
 	}
+	b.subSnapshots[eventType] = snapshotGroup(group)
 }
 
 func (b *Bus) snapshotSubscriptions(eventType reflect.Type) []*subscription {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-
-	group := b.subs[eventType]
-	if len(group) == 0 {
-		return nil
-	}
-
-	out := make([]*subscription, 0, len(group))
-	for _, sub := range group {
-		out = append(out, sub)
-	}
-	return out
+	return b.subSnapshots[eventType]
 }
 
 func newSubscription(
@@ -212,17 +219,36 @@ func (s *subscription) matches(env envelope) bool {
 	return true
 }
 
-func (s *subscription) deliver(ctx context.Context, env envelope) error {
-	if !s.gate.Enter() {
+func snapshotGroup(group map[uint64]*subscription) []*subscription {
+	if len(group) == 0 {
 		return nil
+	}
+
+	out := make([]*subscription, 0, len(group))
+	for _, sub := range group {
+		out = append(out, sub)
+	}
+	return out
+}
+
+func closeWaitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrCloseIncomplete, err)
+}
+
+func (s *subscription) deliver(ctx context.Context, env envelope) (bool, error) {
+	if !s.gate.Enter() {
+		return false, nil
 	}
 	defer s.gate.Leave()
 
 	if !s.async {
-		return s.callHandler(ctx, env)
+		return true, s.callHandler(ctx, env)
 	}
 
-	return s.enqueue(ctx, env)
+	return true, s.enqueue(ctx, env)
 }
 
 func (s *subscription) enqueue(ctx context.Context, env envelope) error {
@@ -381,7 +407,7 @@ func (s *subscription) onError(env envelope, err error) {
 		Async:     s.async,
 		Err:       err,
 	}
-	safeCall(func() { s.hooks.OnHandlerError(info) })
+	safeCall("OnHandlerError", hookPanicReporter(&s.hooks), func() { s.hooks.OnHandlerError(info) })
 }
 
 func (s *subscription) onPanic(env envelope, value any) {
@@ -396,7 +422,7 @@ func (s *subscription) onPanic(env envelope, value any) {
 		Async:     s.async,
 		Value:     value,
 	}
-	safeCall(func() { s.hooks.OnHandlerPanic(info) })
+	safeCall("OnHandlerPanic", hookPanicReporter(&s.hooks), func() { s.hooks.OnHandlerPanic(info) })
 }
 
 func (s *subscription) onDropped(env envelope, reason error) {
@@ -412,7 +438,7 @@ func (s *subscription) onDropped(env envelope, reason error) {
 		Policy:    s.overflow,
 		Reason:    reason,
 	}
-	safeCall(func() { s.hooks.OnEventDropped(info) })
+	safeCall("OnEventDropped", hookPanicReporter(&s.hooks), func() { s.hooks.OnEventDropped(info) })
 }
 
 func (s *subscription) mailboxForKey(key string) chan workItem {
@@ -427,6 +453,31 @@ func (s *subscription) mailboxForKey(key string) chan workItem {
 }
 
 func (s *subscription) invoke(ctx context.Context, dispatch Dispatch) error {
+	return s.dispatch(ctx, dispatch)(ctx, dispatch)
+}
+
+func (s *subscription) dispatch(ctx context.Context, dispatch Dispatch) Next {
+	bus := s.bus
+	if bus == nil {
+		return func(ctx context.Context, dispatch Dispatch) error {
+			return s.handler(ctx, envelope{
+				topic:   dispatch.Topic,
+				key:     dispatch.Key,
+				value:   dispatch.Value,
+				headers: dispatch.Headers,
+			})
+		}
+	}
+
+	version := bus.middlewareVersion.Load()
+
+	s.dispatchMu.Lock()
+	defer s.dispatchMu.Unlock()
+
+	if s.dispatchHandler != nil && s.dispatchVersion == version {
+		return s.dispatchHandler
+	}
+
 	final := func(ctx context.Context, dispatch Dispatch) error {
 		return s.handler(ctx, envelope{
 			topic:   dispatch.Topic,
@@ -436,34 +487,22 @@ func (s *subscription) invoke(ctx context.Context, dispatch Dispatch) error {
 		})
 	}
 
-	chain := s.middlewareChain()
+	chain := bus.currentMiddlewareChain()
 	if chain == nil {
-		return final(ctx, dispatch)
+		s.dispatchHandler = final
+		s.dispatchVersion = version
+		return final
 	}
-	return chain(final)(ctx, dispatch)
+
+	s.dispatchHandler = chain(final)
+	s.dispatchVersion = version
+	return s.dispatchHandler
 }
 
-func (s *subscription) middlewareChain() func(Next) Next {
-	bus := s.bus
-	if bus == nil {
-		return nil
-	}
-
-	bus.middlewareMu.RLock()
-	defer bus.middlewareMu.RUnlock()
-
-	if len(bus.middlewares) == 0 {
-		return nil
-	}
-
-	middlewares := append([]Middleware(nil), bus.middlewares...)
-	return func(next Next) Next {
-		wrapped := next
-		for i := len(middlewares) - 1; i >= 0; i-- {
-			wrapped = middlewares[i](wrapped)
-		}
-		return wrapped
-	}
+func (b *Bus) currentMiddlewareChain() func(Next) Next {
+	b.middlewareMu.RLock()
+	defer b.middlewareMu.RUnlock()
+	return b.middleware
 }
 
 // HandlerPanicError wraps a recovered handler panic as an error value.

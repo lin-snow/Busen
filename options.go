@@ -44,16 +44,28 @@ type publishConfig struct {
 }
 
 // Option configures a Bus.
+//
+// Callers typically obtain Option values from helpers such as
+// [WithDefaultBuffer], [WithDefaultOverflow], [WithHooks], and
+// [WithMiddleware] rather than implementing this interface directly.
 type Option interface {
 	apply(*config) error
 }
 
 // PublishOption configures a publish call.
+//
+// Callers typically obtain PublishOption values from helpers such as
+// [WithTopic], [WithKey], and [WithHeaders] rather than implementing this
+// interface directly.
 type PublishOption interface {
 	applyPublish(*publishConfig) error
 }
 
 // SubscribeOption configures a subscription.
+//
+// Callers typically obtain SubscribeOption values from helpers such as
+// [Async], [Sequential], [WithParallelism], [WithBuffer], [WithOverflow], and
+// [WithFilter] rather than implementing this interface directly.
 type SubscribeOption interface {
 	applySubscribe(*subscribeConfig) error
 }

@@ -23,4 +23,8 @@ var (
 
 	// ErrHandlerPanic indicates that a handler panicked while processing an event.
 	ErrHandlerPanic = errors.New("busen: handler panic")
+
+	// ErrCloseIncomplete indicates that Close stopped new work but did not finish
+	// draining all in-flight work before the provided context ended.
+	ErrCloseIncomplete = errors.New("busen: close incomplete")
 )

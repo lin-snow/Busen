@@ -38,7 +38,7 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 			Key:       cfg.key,
 			Headers:   cloneHeaders(cfg.headers),
 		}
-		safeCall(func() { b.hooks.OnPublishStart(info) })
+		safeCall("OnPublishStart", hookPanicReporter(&b.hooks), func() { b.hooks.OnPublishStart(info) })
 	}
 
 	subs := b.snapshotSubscriptions(eventType)
@@ -50,8 +50,9 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 				Key:                cfg.key,
 				Headers:            cloneHeaders(cfg.headers),
 				MatchedSubscribers: 0,
+				DeliveredSubscribers: 0,
 			}
-			safeCall(func() { b.hooks.OnPublishDone(info) })
+			safeCall("OnPublishDone", hookPanicReporter(&b.hooks), func() { b.hooks.OnPublishDone(info) })
 		}
 		return nil
 	}
@@ -65,12 +66,17 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 
 	var errs []error
 	matched := 0
+	delivered := 0
 	for _, sub := range subs {
 		if !sub.matches(env) {
 			continue
 		}
 		matched++
-		if deliverErr := sub.deliver(ctx, env); deliverErr != nil {
+		accepted, deliverErr := sub.deliver(ctx, env)
+		if accepted {
+			delivered++
+		}
+		if deliverErr != nil {
 			errs = append(errs, deliverErr)
 		}
 	}
@@ -83,9 +89,10 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 			Key:                cfg.key,
 			Headers:            cloneHeaders(cfg.headers),
 			MatchedSubscribers: matched,
+			DeliveredSubscribers: delivered,
 			Err:                err,
 		}
-		safeCall(func() { b.hooks.OnPublishDone(info) })
+		safeCall("OnPublishDone", hookPanicReporter(&b.hooks), func() { b.hooks.OnPublishDone(info) })
 	}
 
 	return err

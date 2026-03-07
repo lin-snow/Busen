@@ -1,58 +1,23 @@
 # Busen
 
-`Busen` 是一个 **本地进程内、typed-first、小而美** 的 Go EventBus。
+`Busen` 是一个小而清晰、typed-first、进程内的 Go 事件总线。
 
-它面向简单应用中的模块解耦与事件分发，强调泛型、`context.Context`、
-functional options 和明确的并发语义。它不是消息平台，也不承担分布式、
-持久化或重型治理能力。
+它面向应用内部的本地解耦，强调泛型、`context.Context`、函数式选项
+和明确的并发语义。它不是消息代理，也不尝试提供持久化、重放、
+跨进程投递或重型运维能力。
 
-## 定位
+## 快速概览
 
-`Busen` 的目标很明确：
-
-- 只做 **in-process** 事件分发
-- 默认走 **typed-first** 模型
-- 提供轻量 topic 路由、middleware 和 hooks
-- 保持 API 小而清晰
-- 不内置 tracing、metrics、retry、rate limiting 这类重型能力
-
-## 核心特性
-
-- **类型安全发布/订阅**
-  使用 `Subscribe[T]` 和 `Publish[T]`，以 Go `struct` 作为事件载体。
-- **轻量 Topic 路由**
-  支持基于 `string topic` 的路由，以及克制的 wildcard 匹配。
-- **多种订阅方式**
-  支持按类型、按 topic、按 predicate filter 订阅。
-- **同步 / 异步分发**
-  支持 sync handler、async handler，以及 worker/parallelism 配置。
-- **显式背压控制**
-  提供 bounded queue 与 `OverflowBlock`、`OverflowFailFast`、`OverflowDropNewest`、`OverflowDropOldest` 等策略。
-- **局部顺序保证**
-  支持 single-worker FIFO，以及同一订阅者内的同 key 局部顺序。
-- **轻量扩展能力**
-  提供 thin middleware 与 lightweight hooks，但不演变成重型框架。
+- 范围：只做进程内事件分发
+- API 风格：typed-first、基于泛型的发布订阅
+- 扩展能力：topic 路由、中间件、钩子、有界异步投递
+- 不包含：retry、tracing、metrics、rate limiting、持久化
 
 ## 安装
 
 ```bash
 go get github.com/lin-snow/Busen
 ```
-
-## 何时适合使用
-
-`Busen` 适合这些场景：
-
-- 你想在单个 Go 应用内部做 typed event 解耦
-- 你需要轻量 topic 路由和 bounded async delivery
-- 你希望库本身足够小，而不是引入一个事件平台
-- 你更愿意把业务治理策略放在 bus 外部组合
-
-`Busen` 不适合这些场景：
-
-- 你需要 durability、replay 或 cross-process delivery
-- 你需要内置 tracing、metrics、retry、rate limiting 框架
-- 你需要全局顺序保证
 
 ## 快速开始
 
@@ -94,6 +59,78 @@ func main() {
 
 	_ = bus.Close(context.Background())
 }
+```
+
+## API 选择建议
+
+大多数场景可以按下面方式选 API：
+
+| 场景 | 建议 API |
+| --- | --- |
+| 只按类型收消息 | `Subscribe[T]` |
+| 还需要按 topic 约束 | `SubscribeTopic[T]` |
+| 需要按事件内容过滤 | `SubscribeMatch[T]` 或 `WithFilter(...)` |
+| 希望调用方同步拿到 handler error | 默认同步订阅 |
+| 希望异步投递并显式控制背压 | `Async()` + `WithBuffer(...)` + `WithOverflow(...)` |
+| 希望单个订阅者 FIFO | `Sequential()` |
+| 希望同一 key 局部有序 | `Async()` + `WithParallelism(...)` + 发布时 `WithKey(...)` |
+| 希望观测 publish / panic / drop | `WithHooks(...)` |
+| 希望只包裹本地 handler 调用 | `Use(...)` 或 `WithMiddleware(...)` |
+
+## 何时适合使用
+
+| 适合使用 | 不适合使用 |
+| --- | --- |
+| 你希望在单个 Go 进程内做 typed event 解耦 | 你需要持久化、重放或跨进程投递 |
+| 你需要轻量 topic 路由和有界异步投递 | 你需要内置 tracing、metrics、retry 或 rate limiting |
+| 你希望使用一个小库，而不是引入事件平台 | 你需要全局顺序保证 |
+| 你希望把运维和治理策略放在 bus 外部自行组合 | 你需要更重的消息平台或分布式能力 |
+
+## 为什么存在
+
+- **类型安全的发布订阅**
+  使用 `Subscribe[T]` 和 `Publish[T]`，以普通 Go 值作为事件载体。
+- **轻量 topic 路由**
+  基于 `string` topic 做路由，只提供克制的 wildcard 支持。
+- **多种订阅方式**
+  支持按类型、topic 模式和谓词过滤订阅。
+- **同步与异步投递**
+  可以选择直接执行 handler，或使用有界 worker 异步投递。
+- **显式背压**
+  异步订阅支持 `OverflowBlock`、`OverflowFailFast`、
+  `OverflowDropNewest` 和 `OverflowDropOldest`。
+- **局部顺序保证**
+  支持单 worker FIFO，以及单个异步订阅者内的 per-key 顺序。
+- **克制的扩展能力**
+  中间件和钩子只用于本地组合，不把库演变成重型框架。
+
+## 架构概览
+
+```mermaid
+flowchart LR
+    publisher[调用方]
+    publishFn["Publish[T]"]
+    publishHooks[发布钩子]
+    typeLookup[按事件类型查找订阅者]
+    routeMatch[topic和过滤匹配]
+    lifecycleGate[订阅生命周期检查]
+    syncPath[同步调用handler]
+    asyncQueue[异步队列mailbox]
+    workers[worker协程]
+    handler[类型化handler]
+    runtimeHooks[运行时钩子]
+
+    publisher --> publishFn
+    publishFn --> publishHooks
+    publishFn --> typeLookup
+    typeLookup --> routeMatch
+    routeMatch --> lifecycleGate
+    lifecycleGate --> syncPath
+    lifecycleGate --> asyncQueue
+    asyncQueue --> workers
+    syncPath --> handler
+    workers --> handler
+    handler --> runtimeHooks
 ```
 
 ## Topic 路由
@@ -158,8 +195,8 @@ _ = busen.Publish(context.Background(), bus, UserCreated{ID: "2"}, busen.WithKey
 
 ### Middleware
 
-`Busen` 提供一个很薄的 dispatch middleware 层，用来做本地组合，而不是做
-重型 pipeline framework。
+`Busen` 提供一个很薄的 dispatch 中间件层，用来做本地组合，而不是做
+重型 pipeline 框架。
 
 ```go
 err = bus.Use(func(next busen.Next) busen.Next {
@@ -172,14 +209,14 @@ if err != nil {
 }
 ```
 
-`middleware` 的边界：
+中间件的边界：
 
 - 只包 handler invocation
-- 不替代 hooks
+- 不替代钩子
 - 不承担 retries、metrics、tracing、distributed concerns
 - 不影响 subscriber matching、topic routing、async queue selection
-- 对 `Dispatch` 的修改只影响后续 middleware 和最终 handler
-- hooks 仍然观察原始 publish 元数据
+- 对 `Dispatch` 的修改只影响后续中间件和最终 handler
+- 钩子仍然观察原始 publish 元数据
 
 如果你更喜欢构造期注册方式，也可以使用 `WithMiddleware(...)`：
 
@@ -193,13 +230,16 @@ bus := busen.New(
 )
 ```
 
-### Hooks
+### 钩子
 
 `Hooks` 用来观察运行时事件，而不是参与 handler 调用链控制。
 
 ```go
 bus := busen.New(
 	busen.WithHooks(busen.Hooks{
+		OnPublishDone: func(info busen.PublishDone) {
+			log.Printf("matched=%d delivered=%d err=%v", info.MatchedSubscribers, info.DeliveredSubscribers, info.Err)
+		},
 		OnHandlerError: func(info busen.HandlerError) {
 			log.Printf("async=%v topic=%q err=%v", info.Async, info.Topic, info.Err)
 		},
@@ -213,65 +253,31 @@ bus := busen.New(
 )
 ```
 
-当前 hooks 触发点包括：
+当前钩子触发点包括：
 
 - `OnPublishStart`
 - `OnPublishDone`
 - `OnHandlerError`
 - `OnHandlerPanic`
 - `OnEventDropped`
+- `OnHookPanic`
+
+说明：
+
+- `MatchedSubscribers` 表示路由条件命中的订阅者数量
+- `DeliveredSubscribers` 表示通过生命周期检查并真正开始同步调用或异步入队的订阅者数量
+- 如果某个钩子自己 panic，`Busen` 默认会恢复该 panic，继续主流程；如需诊断，可以实现 `OnHookPanic`
 
 ## 和社区四类模式的差异
 
 这里的四类并不完全处在同一抽象层级，但它们是很多用户在选型时会自然拿来比较的对象。
 
-### 1. EventEmitter
-
-`EventEmitter` 往往追求简单和灵活，通常更接近：
-
-- callback 风格
-- string/event-name 驱动
-- 类型约束较弱
-
-`Busen` 相比之下更强调：
-
-- typed-first
-- 本地并发语义明确
-- bounded async delivery
-- 背压和局部顺序
-
-### 2. TypedBus
-
-`TypedBus` 与 `Busen` 最接近，因为都强调类型安全。  
-区别通常在于：
-
-- 很多 `TypedBus` 只把“类型安全发布/订阅”做得很好
-- `Busen` 在此基础上继续补了 topic、背压、局部顺序、middleware、hooks
-
-所以 `Busen` 可以理解成：**typed-first，但不是只有类型安全这一层能力。**
-
-### 3. CQRS
-
-`CQRS` 是一种架构模式，核心是命令和查询分离。  
-它不等于本地事件总线，也不天然提供：
-
-- 本地 pub/sub
-- topic routing
-- bounded async delivery
-
-`Busen` 不是 CQRS framework。  
-如果你的应用用了 CQRS，`Busen` 可以作为其中的一个本地事件分发组件，但不会替你实现整个 CQRS 模型。
-
-### 4. Mediator
-
-`Mediator` 更强调“协调调用”而不是“事件广播”：
-
-- 更像 request/handler 组织方式
-- 往往是一对一或中心协调
-- 不一定提供真正的 async pub/sub 语义
-
-`Busen` 不是 orchestration-style mediator。  
-它更适合用来做 **事件广播式解耦**，而不是中心化业务调度。
+| 模式 | 更常见的关注点 | 和 `Busen` 的主要差异 | `Busen` 的定位 |
+| --- | --- | --- | --- |
+| `EventEmitter` | callback 风格、`string`/event-name 驱动、类型约束较弱 | `Busen` 更强调 typed-first、本地并发语义、bounded async delivery、背压和局部顺序 | 更适合需要类型安全和明确并发语义的进程内事件分发 |
+| `TypedBus` | 类型安全发布订阅 | 很多 `TypedBus` 只把“类型安全发布/订阅”做得很好，而 `Busen` 在此基础上继续补了 topic、背压、局部顺序、中间件和钩子 | 可以理解成 typed-first，但不止有类型安全这一层能力 |
+| `CQRS` | 命令与查询分离的架构模式 | `CQRS` 不等于本地事件总线，也不天然提供本地 pub/sub、topic routing 或 bounded async delivery | 不是 `CQRS` framework，但可以作为 CQRS 体系中的本地事件分发组件 |
+| `Mediator` | request/handler 组织、一对一协调、中心化调用 | `Mediator` 更强调协调调用而不是事件广播，也不一定提供真正的 async pub/sub 语义 | 更适合做事件广播式解耦，而不是中心化业务调度 |
 
 ## 性能测试
 
@@ -294,19 +300,26 @@ go test ./... -run '^$' -bench . -benchmem
 
 这些数字代表的是 **in-process event bus 的热路径开销**，不是消息系统吞吐保证。
 
-在一台较新的 Apple Silicon 机器上，当前基线大致为：
+在一台 Apple M4 机器上的一轮参考结果大致为：
 
-- sync publish（1 subscriber）：约 `130-145 ns/op`
-- sync publish（10 subscribers）：约 `500-530 ns/op`
-- async sequential publish：约 `250-265 ns/op`
-- async keyed publish：约 `300-305 ns/op`
-- middleware-enabled publish：约 `190-195 ns/op`
-- middleware + hooks publish：约 `235-240 ns/op`
-- async keyed + topic publish：约 `375-380 ns/op`
-- exact topic publish：约 `160 ns/op`
-- wildcard topic publish：约 `170 ns/op`
+| 场景 | 参考耗时 |
+| --- | --- |
+| sync publish（1 subscriber） | 约 `111 ns/op` |
+| sync publish（10 subscribers） | 约 `575 ns/op` |
+| async sequential publish | 约 `200 ns/op` |
+| async keyed publish | 约 `273 ns/op` |
+| middleware-enabled publish | 约 `111 ns/op` |
+| middleware + hooks publish | 约 `127 ns/op` |
+| async keyed + topic publish | 约 `290 ns/op` |
+| exact topic publish | 约 `127 ns/op` |
+| wildcard topic publish | 约 `131 ns/op` |
 
-这一轮里，一个最明确的数据驱动优化是：把 wildcard router match 路径的分配降到了 `0 allocs/op`，direct matcher 大约在 `7 ns/op` 左右。
+这一轮里，router matcher 依然保持 `0 allocs/op`：
+
+| matcher | 参考耗时 | 分配 |
+| --- | --- | --- |
+| exact matcher | 约 `1.5 ns/op` | `0 allocs/op` |
+| wildcard matcher | 约 `6.1 ns/op` | `0 allocs/op` |
 
 ## 设计边界
 
@@ -316,6 +329,7 @@ go test ./... -run '^$' -bench . -benchmem
 - 非空 ordering key 只提供局部顺序保证
 - sync handler 错误会直接返回给 `Publish`
 - async handler error / panic 不会回传给 `Publish`，应通过 `Hooks` 观察
+- `Close(ctx)` 超时只表示未在期限内 drain 完成，不会强制终止用户 handler
 - 这是一个简单 app 使用的小库，不是 distributed event platform
 
 ## 开发

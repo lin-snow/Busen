@@ -914,6 +914,53 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCloseTimeoutReportsIncompleteDrain(t *testing.T) {
+	bus := New()
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}, Async(), WithBuffer(1))
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, 1); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for async handler start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	err = bus.Close(ctx)
+	if !errors.Is(err, ErrCloseIncomplete) {
+		t.Fatalf("Close() error = %v, want ErrCloseIncomplete", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Close() error = %v, want context deadline exceeded", err)
+	}
+
+	close(release)
+
+	if err := bus.Close(context.Background()); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+}
+
 func TestPublishHooks(t *testing.T) {
 	startCh := make(chan PublishStart, 1)
 	doneCh := make(chan PublishDone, 1)
@@ -953,11 +1000,95 @@ func TestPublishHooks(t *testing.T) {
 		if info.MatchedSubscribers != 1 {
 			t.Fatalf("done hook matched %d subscribers, want 1", info.MatchedSubscribers)
 		}
+		if info.DeliveredSubscribers != 1 {
+			t.Fatalf("done hook delivered %d subscribers, want 1", info.DeliveredSubscribers)
+		}
 		if info.Err != nil {
 			t.Fatalf("done hook error = %v, want nil", info.Err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for publish done hook")
+	}
+}
+
+func TestPublishDoneSeparatesMatchedAndDeliveredSubscribers(t *testing.T) {
+	doneCh := make(chan PublishDone, 1)
+	bus := New(WithHooks(Hooks{
+		OnPublishDone: func(info PublishDone) {
+			doneCh <- info
+		},
+	}))
+
+	var called atomic.Int64
+	var unsubscribe func()
+
+	var err error
+	unsubscribe, err = SubscribeMatch(bus, func(event Event[int]) bool {
+		unsubscribe()
+		return true
+	}, func(ctx context.Context, event Event[int]) error {
+		called.Add(1)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeMatch() error = %v", err)
+	}
+
+	if err := Publish(context.Background(), bus, 1); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	select {
+	case info := <-doneCh:
+		if info.MatchedSubscribers != 1 {
+			t.Fatalf("MatchedSubscribers = %d, want 1", info.MatchedSubscribers)
+		}
+		if info.DeliveredSubscribers != 0 {
+			t.Fatalf("DeliveredSubscribers = %d, want 0", info.DeliveredSubscribers)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for publish done hook")
+	}
+
+	if called.Load() != 0 {
+		t.Fatalf("handler called %d times, want 0", called.Load())
+	}
+}
+
+func TestHookPanicsAreReportedWithoutBreakingPublish(t *testing.T) {
+	hookPanicCh := make(chan HookPanic, 1)
+	bus := New(WithHooks(Hooks{
+		OnPublishDone: func(PublishDone) {
+			panic("hook boom")
+		},
+		OnHookPanic: func(info HookPanic) {
+			hookPanicCh <- info
+			panic("reporter boom")
+		},
+	}))
+
+	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, 1); err != nil {
+		t.Fatalf("Publish() error = %v, want nil", err)
+	}
+
+	select {
+	case info := <-hookPanicCh:
+		if info.Hook != "OnPublishDone" {
+			t.Fatalf("Hook = %q, want OnPublishDone", info.Hook)
+		}
+		if info.Value != "hook boom" {
+			t.Fatalf("Value = %v, want hook boom", info.Value)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for hook panic report")
 	}
 }
 

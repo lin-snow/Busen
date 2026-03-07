@@ -2,9 +2,13 @@ package busen
 
 // Event is the typed value delivered to handlers.
 type Event[T any] struct {
-	Topic   string
-	Key     string
-	Value   T
+	// Topic carries optional routing metadata supplied at publish time.
+	Topic string
+	// Key carries the optional ordering key supplied at publish time.
+	Key string
+	// Value is the typed event payload.
+	Value T
+	// Headers contains a shallow copy of publish headers visible to handlers.
 	Headers map[string]string
 }
 

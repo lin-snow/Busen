@@ -17,12 +17,18 @@ import (
 //   - changes do not affect subscriber matching, publish-level hooks, or
 //     async queue selection, all of which happen before middleware runs
 type Dispatch struct {
+	// EventType is the exact Go type being dispatched.
 	EventType reflect.Type
-	Topic     string
-	Key       string
-	Headers   map[string]string
-	Value     any
-	Async     bool
+	// Topic is the publish topic after publish options have been applied.
+	Topic string
+	// Key is the publish ordering key after publish options have been applied.
+	Key string
+	// Headers is a mutable copy of the publish headers for this handler call.
+	Headers map[string]string
+	// Value is the event payload that will be passed to the typed handler.
+	Value any
+	// Async reports whether the target subscription is asynchronous.
+	Async bool
 }
 
 // Next is the continuation function used by Middleware.
@@ -58,5 +64,22 @@ func (b *Bus) Use(middlewares ...Middleware) error {
 		combined = append(combined, middleware)
 	}
 	b.middlewares = combined
+	b.middleware = buildMiddlewareChain(combined)
+	b.middlewareVersion.Add(1)
 	return nil
+}
+
+func buildMiddlewareChain(middlewares []Middleware) func(Next) Next {
+	if len(middlewares) == 0 {
+		return nil
+	}
+
+	cached := append([]Middleware(nil), middlewares...)
+	return func(next Next) Next {
+		wrapped := next
+		for i := len(cached) - 1; i >= 0; i-- {
+			wrapped = cached[i](wrapped)
+		}
+		return wrapped
+	}
 }
