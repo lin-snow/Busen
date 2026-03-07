@@ -2,9 +2,14 @@
 
 ## Supported Versions
 
-`Busen` is an early-stage library. Security fixes are generally applied to the latest code on the default branch first.
+`Busen` is currently released as an early-stage `v0.x` library.
 
-If the project starts maintaining release branches in the future, this policy should be updated to describe supported versions explicitly.
+Security fixes are applied to:
+
+- the latest released tag in the current `v0` line
+- the latest code on the default branch when the fix has not yet been released
+
+Older tags are not guaranteed to receive backported fixes unless stated otherwise.
 
 ## Reporting a Vulnerability
 

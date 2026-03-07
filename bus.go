@@ -73,13 +73,13 @@ func New(opts ...Option) *Bus {
 	}
 
 	return &Bus{
-		cfg:         cfg,
-		hooks:       cfg.hooks,
-		gate:        intdispatch.NewGate(),
-		subs:        make(map[reflect.Type]map[uint64]*subscription),
+		cfg:          cfg,
+		hooks:        cfg.hooks,
+		gate:         intdispatch.NewGate(),
+		subs:         make(map[reflect.Type]map[uint64]*subscription),
 		subSnapshots: make(map[reflect.Type][]*subscription),
-		middlewares: append([]Middleware(nil), cfg.middlewares...),
-		middleware:  buildMiddlewareChain(cfg.middlewares),
+		middlewares:  append([]Middleware(nil), cfg.middlewares...),
+		middleware:   buildMiddlewareChain(cfg.middlewares),
 	}
 }
 

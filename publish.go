@@ -45,11 +45,11 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 	if len(subs) == 0 {
 		if b.hooks.OnPublishDone != nil {
 			info := PublishDone{
-				EventType:          eventType,
-				Topic:              cfg.topic,
-				Key:                cfg.key,
-				Headers:            cloneHeaders(cfg.headers),
-				MatchedSubscribers: 0,
+				EventType:            eventType,
+				Topic:                cfg.topic,
+				Key:                  cfg.key,
+				Headers:              cloneHeaders(cfg.headers),
+				MatchedSubscribers:   0,
 				DeliveredSubscribers: 0,
 			}
 			safeCall("OnPublishDone", hookPanicReporter(&b.hooks), func() { b.hooks.OnPublishDone(info) })
@@ -84,13 +84,13 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 	err := errors.Join(errs...)
 	if b.hooks.OnPublishDone != nil {
 		info := PublishDone{
-			EventType:          eventType,
-			Topic:              cfg.topic,
-			Key:                cfg.key,
-			Headers:            cloneHeaders(cfg.headers),
-			MatchedSubscribers: matched,
+			EventType:            eventType,
+			Topic:                cfg.topic,
+			Key:                  cfg.key,
+			Headers:              cloneHeaders(cfg.headers),
+			MatchedSubscribers:   matched,
 			DeliveredSubscribers: delivered,
-			Err:                err,
+			Err:                  err,
 		}
 		safeCall("OnPublishDone", hookPanicReporter(&b.hooks), func() { b.hooks.OnPublishDone(info) })
 	}

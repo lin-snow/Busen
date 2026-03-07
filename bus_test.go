@@ -210,6 +210,37 @@ func TestWithMiddlewareRegistersGlobalMiddleware(t *testing.T) {
 	}
 }
 
+func TestUseAfterSubscribeAppliesToExistingSubscriptions(t *testing.T) {
+	bus := New()
+
+	var calls []string
+	unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
+		calls = append(calls, "handler")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := bus.Use(func(next Next) Next {
+		return func(ctx context.Context, dispatch Dispatch) error {
+			calls = append(calls, "middleware")
+			return next(ctx, dispatch)
+		}
+	}); err != nil {
+		t.Fatalf("Use() error = %v", err)
+	}
+
+	if err := Publish(context.Background(), bus, 1); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	if !reflect.DeepEqual(calls, []string{"middleware", "handler"}) {
+		t.Fatalf("calls = %v, want [middleware handler]", calls)
+	}
+}
+
 func TestMiddlewareDoesNotAffectPublishHooksOrRouting(t *testing.T) {
 	startCh := make(chan PublishStart, 1)
 	doneCh := make(chan PublishDone, 1)

@@ -9,6 +9,11 @@ Choose the path that best matches your request:
 - Feature ideas: use the feature request template and explain the problem you want to solve.
 - Security concerns: do not open a public issue. Follow `SECURITY.md`.
 
+For the current `v0.x` stage, support is best-effort and focused on:
+
+- the latest released tag
+- the latest code on the default branch when discussing unreleased fixes or documentation updates
+
 ## What to Include
 
 Support requests are easier to answer when they include:

@@ -7,6 +7,10 @@ and this project follows semantic versioning once stable releases begin.
 
 ## [Unreleased]
 
+- No unreleased changes yet.
+
+## [v0.1.0] - 2026-03-08
+
 ### Added
 
 - Added `PublishDone.DeliveredSubscribers` to distinguish routing matches from
