@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose an improvement or new capability for Busen
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the problem you want to solve before proposing an API or implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What limitation, pain point, or missing capability are you facing?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or API shape you would like to see
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, workarounds, or reasons this may be out of scope
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example usage
+      description: Optional sample code or call-site sketch
+      render: go

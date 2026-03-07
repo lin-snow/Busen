@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a defect, regression, or unexpected behavior in Busen
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail to reproduce the issue.
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      description: Output of `go version`
+      placeholder: go version go1.25.0 darwin/arm64
+    validations:
+      required: true
+  - type: input
+    id: busen-version
+    attributes:
+      label: Busen version
+      description: Module version, pseudo-version, or commit SHA
+      placeholder: main or v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior and why it is unexpected
+      placeholder: Publish blocks forever when...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Share the smallest code sample or steps that reproduce the issue
+      render: go
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Logs, stack traces, race detector output, or related details
