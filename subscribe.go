@@ -119,6 +119,7 @@ func subscribeWithMatcher[T any](
 
 type matchAny []router.Matcher
 
+// Match reports whether any compiled topic matcher accepts the topic.
 func (m matchAny) Match(topic string) bool {
 	for _, matcher := range m {
 		if matcher.Match(topic) {

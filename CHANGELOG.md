@@ -9,6 +9,20 @@ and this project follows semantic versioning once stable releases begin.
 
 - No unreleased changes yet.
 
+## [v0.2.0] - 2026-03-08
+
+### Added
+
+- Added `SubscribeTopics[T]` for registering one typed handler against multiple
+  topic patterns with OR matching semantics.
+- Added an example and README guidance for multi-topic typed subscriptions.
+
+### Fixed
+
+- Added regression tests covering overlapping topic patterns, invalid pattern
+  handling, filter composition, unified unsubscribe behavior, and hook counting
+  semantics for `SubscribeTopics[T]`.
+
 ## [v0.1.0] - 2026-03-08
 
 ### Added
