@@ -60,6 +60,34 @@ func ExampleSubscribeTopic() {
 	// orders.eu.created=created
 }
 
+func ExampleSubscribeTopics() {
+	b := busen.New()
+
+	unsubscribe, err := busen.SubscribeTopics(b, []string{"orders.created", "orders.updated"}, func(_ context.Context, event busen.Event[string]) error {
+		fmt.Printf("%s=%s\n", event.Topic, event.Value)
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer unsubscribe()
+
+	if err := busen.Publish(context.Background(), b, "created", busen.WithTopic("orders.created")); err != nil {
+		log.Fatal(err)
+	}
+	if err := busen.Publish(context.Background(), b, "updated", busen.WithTopic("orders.updated")); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := b.Close(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+
+	// Output:
+	// orders.created=created
+	// orders.updated=updated
+}
+
 func ExampleAsync() {
 	type JobQueued struct {
 		ID string

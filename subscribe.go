@@ -24,6 +24,16 @@ func SubscribeTopic[T any](b *Bus, pattern string, handler Handler[T], opts ...S
 	return subscribeWithMatcher(b, matcher, nil, handler, opts...)
 }
 
+// SubscribeTopics registers a type-based subscription constrained by multiple topic patterns.
+func SubscribeTopics[T any](b *Bus, patterns []string, handler Handler[T], opts ...SubscribeOption) (func(), error) {
+	matcher, err := compileMatchers(patterns)
+	if err != nil {
+		return nil, err
+	}
+
+	return subscribeWithMatcher(b, matcher, nil, handler, opts...)
+}
+
 // SubscribeMatch registers a type-based subscription constrained by a predicate filter.
 func SubscribeMatch[T any](b *Bus, match func(Event[T]) bool, handler Handler[T], opts ...SubscribeOption) (func(), error) {
 	if match == nil {
@@ -105,4 +115,32 @@ func subscribeWithMatcher[T any](
 			sub.scheduleStop()
 		})
 	}, nil
+}
+
+type matchAny []router.Matcher
+
+func (m matchAny) Match(topic string) bool {
+	for _, matcher := range m {
+		if matcher.Match(topic) {
+			return true
+		}
+	}
+	return false
+}
+
+func compileMatchers(patterns []string) (router.Matcher, error) {
+	if len(patterns) == 0 {
+		return nil, fmt.Errorf("%w: patterns must not be empty", ErrInvalidOption)
+	}
+
+	matchers := make(matchAny, 0, len(patterns))
+	for _, pattern := range patterns {
+		matcher, err := router.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidPattern, pattern)
+		}
+		matchers = append(matchers, matcher)
+	}
+
+	return matchers, nil
 }

@@ -725,6 +725,180 @@ func TestSubscribeTopicWildcard(t *testing.T) {
 	}
 }
 
+func TestSubscribeTopicsMatchesAnyPattern(t *testing.T) {
+	bus := New()
+
+	var got []string
+	var mu sync.Mutex
+
+	unsubscribe, err := SubscribeTopics(bus, []string{"orders.created", "payments.failed"}, func(ctx context.Context, event Event[string]) error {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, event.Topic)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTopics() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, "created", WithTopic("orders.created")); err != nil {
+		t.Fatalf("Publish(orders.created) error = %v", err)
+	}
+	if err := Publish(context.Background(), bus, "failed", WithTopic("payments.failed")); err != nil {
+		t.Fatalf("Publish(payments.failed) error = %v", err)
+	}
+	if err := Publish(context.Background(), bus, "ignored", WithTopic("orders.updated")); err != nil {
+		t.Fatalf("Publish(orders.updated) error = %v", err)
+	}
+
+	if !reflect.DeepEqual(got, []string{"orders.created", "payments.failed"}) {
+		t.Fatalf("got %v, want matching topics", got)
+	}
+}
+
+func TestSubscribeTopicsSupportsWildcardPatterns(t *testing.T) {
+	bus := New()
+
+	var got []string
+	var mu sync.Mutex
+
+	unsubscribe, err := SubscribeTopics(bus, []string{"orders.>", "payments.*"}, func(ctx context.Context, event Event[string]) error {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, event.Topic)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTopics() error = %v", err)
+	}
+	defer unsubscribe()
+
+	for _, topic := range []string{"orders.created", "orders.eu.archived", "payments.failed"} {
+		if err := Publish(context.Background(), bus, topic, WithTopic(topic)); err != nil {
+			t.Fatalf("Publish(%s) error = %v", topic, err)
+		}
+	}
+	if err := Publish(context.Background(), bus, "ignored", WithTopic("payments.eu.failed")); err != nil {
+		t.Fatalf("Publish(payments.eu.failed) error = %v", err)
+	}
+
+	if !reflect.DeepEqual(got, []string{"orders.created", "orders.eu.archived", "payments.failed"}) {
+		t.Fatalf("got %v, want wildcard matches", got)
+	}
+}
+
+func TestSubscribeTopicsOverlappingPatternsDeliverOnce(t *testing.T) {
+	bus := New()
+
+	var calls atomic.Int64
+	unsubscribe, err := SubscribeTopics(bus, []string{"orders.>", "orders.created"}, func(ctx context.Context, event Event[string]) error {
+		calls.Add(1)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTopics() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, "created", WithTopic("orders.created")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	if calls.Load() != 1 {
+		t.Fatalf("handler called %d times, want 1", calls.Load())
+	}
+}
+
+func TestSubscribeTopicsRejectsEmptyPatterns(t *testing.T) {
+	bus := New()
+
+	unsubscribe, err := SubscribeTopics(bus, nil, func(ctx context.Context, event Event[int]) error {
+		return nil
+	})
+	if !errors.Is(err, ErrInvalidOption) {
+		t.Fatalf("SubscribeTopics() error = %v, want ErrInvalidOption", err)
+	}
+	if unsubscribe != nil {
+		t.Fatal("unsubscribe = non-nil, want nil")
+	}
+}
+
+func TestSubscribeTopicsRejectsInvalidPattern(t *testing.T) {
+	bus := New()
+
+	unsubscribe, err := SubscribeTopics(bus, []string{"orders.created", "orders.>.bad"}, func(ctx context.Context, event Event[int]) error {
+		return nil
+	})
+	if !errors.Is(err, ErrInvalidPattern) {
+		t.Fatalf("SubscribeTopics() error = %v, want ErrInvalidPattern", err)
+	}
+	if unsubscribe != nil {
+		t.Fatal("unsubscribe = non-nil, want nil")
+	}
+}
+
+func TestSubscribeTopicsCombinesWithFilter(t *testing.T) {
+	bus := New()
+
+	var got []int
+	var mu sync.Mutex
+
+	unsubscribe, err := SubscribeTopics(bus, []string{"orders.created", "orders.updated"}, func(ctx context.Context, event Event[int]) error {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, event.Value)
+		return nil
+	}, WithFilter(func(event Event[int]) bool {
+		return event.Value%2 == 0
+	}))
+	if err != nil {
+		t.Fatalf("SubscribeTopics() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, 1, WithTopic("orders.created")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if err := Publish(context.Background(), bus, 2, WithTopic("payments.created")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if err := Publish(context.Background(), bus, 4, WithTopic("orders.updated")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	if !reflect.DeepEqual(got, []int{4}) {
+		t.Fatalf("got %v, want [4]", got)
+	}
+}
+
+func TestSubscribeTopicsUnsubscribeStopsAllPatterns(t *testing.T) {
+	bus := New()
+
+	var calls atomic.Int64
+	unsubscribe, err := SubscribeTopics(bus, []string{"orders.created", "payments.failed"}, func(ctx context.Context, event Event[string]) error {
+		calls.Add(1)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTopics() error = %v", err)
+	}
+
+	if err := Publish(context.Background(), bus, "created", WithTopic("orders.created")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	unsubscribe()
+
+	if err := Publish(context.Background(), bus, "failed", WithTopic("payments.failed")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	if calls.Load() != 1 {
+		t.Fatalf("handler called %d times, want 1", calls.Load())
+	}
+}
+
 func TestUnsubscribeStopsNewMessages(t *testing.T) {
 	bus := New()
 
@@ -1036,6 +1210,39 @@ func TestPublishHooks(t *testing.T) {
 		}
 		if info.Err != nil {
 			t.Fatalf("done hook error = %v, want nil", info.Err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for publish done hook")
+	}
+}
+
+func TestSubscribeTopicsPublishDoneCountsSingleSubscriberOnce(t *testing.T) {
+	doneCh := make(chan PublishDone, 1)
+	bus := New(WithHooks(Hooks{
+		OnPublishDone: func(info PublishDone) {
+			doneCh <- info
+		},
+	}))
+
+	unsubscribe, err := SubscribeTopics(bus, []string{"orders.>", "orders.created"}, func(ctx context.Context, event Event[string]) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTopics() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, "created", WithTopic("orders.created")); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	select {
+	case info := <-doneCh:
+		if info.MatchedSubscribers != 1 {
+			t.Fatalf("MatchedSubscribers = %d, want 1", info.MatchedSubscribers)
+		}
+		if info.DeliveredSubscribers != 1 {
+			t.Fatalf("DeliveredSubscribers = %d, want 1", info.DeliveredSubscribers)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for publish done hook")

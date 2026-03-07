@@ -23,8 +23,8 @@
 // asynchronous subscriber with one worker, or within the same non-empty ordering
 // key for async subscribers with multiple workers.
 //
-// Most applications start with [New], register handlers with [Subscribe] or
-// [SubscribeTopic], and publish values with [Publish]. Use [Async],
+// Most applications start with [New], register handlers with [Subscribe],
+// [SubscribeTopic], or [SubscribeTopics], and publish values with [Publish]. Use [Async],
 // [Sequential], [WithParallelism], and [WithOverflow] when you need bounded
 // asynchronous delivery, and [WithHooks] when you want to observe runtime
 // errors, panics, or dropped events.

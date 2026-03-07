@@ -69,6 +69,7 @@ func main() {
 | --- | --- |
 | 只按类型收消息 | `Subscribe[T]` |
 | 还需要按 topic 约束 | `SubscribeTopic[T]` |
+| 一个 handler 需要订阅多个 topic | `SubscribeTopics[T]` |
 | 需要按事件内容过滤 | `SubscribeMatch[T]` 或 `WithFilter(...)` |
 | 希望调用方同步拿到 handler error | 默认同步订阅 |
 | 希望异步投递并显式控制背压 | `Async()` + `WithBuffer(...)` + `WithOverflow(...)` |
@@ -151,6 +152,22 @@ if err != nil {
 defer sub()
 
 _ = busen.Publish(context.Background(), bus, "created", busen.WithTopic("orders.eu.created"))
+```
+
+如果同一个 handler 需要订阅多个 topic，也可以使用 `SubscribeTopics[T]`：
+
+```go
+sub, err := busen.SubscribeTopics(bus, []string{"orders.created", "orders.updated"}, func(ctx context.Context, event busen.Event[string]) error {
+	fmt.Println(event.Topic, event.Value)
+	return nil
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer sub()
+
+_ = busen.Publish(context.Background(), bus, "created", busen.WithTopic("orders.created"))
+_ = busen.Publish(context.Background(), bus, "updated", busen.WithTopic("orders.updated"))
 ```
 
 ## 异步分发与顺序
