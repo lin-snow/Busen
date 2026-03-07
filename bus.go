@@ -2,7 +2,6 @@ package busen
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -478,10 +477,6 @@ func (e *HandlerPanicError) Error() string {
 
 func (e *HandlerPanicError) Unwrap() error {
 	return ErrHandlerPanic
-}
-
-func isHandlerPanic(err error) bool {
-	return errors.Is(err, ErrHandlerPanic)
 }
 
 func hashString(value string) uint64 {

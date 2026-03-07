@@ -30,12 +30,15 @@ Common local commands are available through the `Makefile`:
 ```bash
 make help
 make fmt
+make lint
 make vet
 make test
 make test-race
 make cover
 make check
 ```
+
+The `lint` target bootstraps `golangci-lint` `v2.3.0` into `./.bin` with the current Go toolchain before running it. This avoids version skew with the Go version declared in `go.mod`.
 
 ## Quick Start
 

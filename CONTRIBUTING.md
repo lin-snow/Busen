@@ -23,6 +23,7 @@ The repository includes a `Makefile` for the most common tasks:
 ```bash
 make help
 make fmt
+make lint
 make vet
 make test
 make test-race
@@ -40,6 +41,8 @@ go test -race ./...
 go test -coverprofile=coverage.out ./...
 ```
 
+`make lint` installs `golangci-lint` `v2.3.0` into `./.bin` using the active Go toolchain and then runs it. This is intentional because the project currently targets Go `1.25.0`, and building the linter with the local toolchain avoids version skew with prebuilt binaries.
+
 ## Contribution Guidelines
 
 - Keep changes focused. Avoid bundling unrelated refactors into the same pull request.
@@ -52,7 +55,7 @@ go test -coverprofile=coverage.out ./...
 
 Before submitting a pull request, please make sure:
 
-- Formatting, vet, and tests all pass locally
+- Formatting, lint, vet, and tests all pass locally
 - New behavior is covered by tests when practical
 - `README.md` and other docs are updated if the public API or workflow changes
 - The pull request description explains the motivation, not only the code diff
