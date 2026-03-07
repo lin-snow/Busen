@@ -1,3 +1,4 @@
+// Package dispatch provides small primitives for coordinating in-process delivery.
 package dispatch
 
 import (
@@ -13,6 +14,7 @@ type Gate struct {
 	idle   chan struct{}
 }
 
+// NewGate creates a gate in the open state.
 func NewGate() *Gate {
 	g := &Gate{
 		idle: make(chan struct{}),
@@ -21,6 +23,7 @@ func NewGate() *Gate {
 	return g
 }
 
+// Enter registers one in-flight operation if the gate is still open.
 func (g *Gate) Enter() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -36,6 +39,7 @@ func (g *Gate) Enter() bool {
 	return true
 }
 
+// Leave marks one in-flight operation as completed.
 func (g *Gate) Leave() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -48,12 +52,14 @@ func (g *Gate) Leave() {
 	}
 }
 
+// Closed reports whether the gate has been closed for new work.
 func (g *Gate) Closed() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.closed
 }
 
+// Close prevents future Enter calls from succeeding.
 func (g *Gate) Close() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -61,6 +67,7 @@ func (g *Gate) Close() {
 	g.closed = true
 }
 
+// Wait blocks until all in-flight work has completed or the context is canceled.
 func (g *Gate) Wait(ctx context.Context) error {
 	g.mu.Lock()
 	idle := g.idle

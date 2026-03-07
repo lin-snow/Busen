@@ -93,6 +93,9 @@ func subscribeWithMatcher[T any](
 	if err := b.addSubscription(eventType, sub); err != nil {
 		return nil, err
 	}
+	if sub.async {
+		sub.startWorkers()
+	}
 
 	var once sync.Once
 	return func() {

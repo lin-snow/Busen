@@ -9,9 +9,13 @@ import (
 type OverflowPolicy int
 
 const (
+	// OverflowBlock blocks the publisher until queue space is available.
 	OverflowBlock OverflowPolicy = iota
+	// OverflowFailFast returns an error instead of waiting for queue space.
 	OverflowFailFast
+	// OverflowDropNewest drops the incoming event when the queue is full.
 	OverflowDropNewest
+	// OverflowDropOldest evicts the oldest queued event to admit the new event.
 	OverflowDropOldest
 )
 

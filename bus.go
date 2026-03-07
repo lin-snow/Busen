@@ -82,13 +82,13 @@ func (b *Bus) Close(ctx context.Context) error {
 	b.gate.Close()
 
 	subs := b.allSubscriptions()
+	if err := b.gate.Wait(ctx); err != nil {
+		return err
+	}
+
 	for _, sub := range subs {
 		sub.stopAccepting()
 		sub.scheduleStop()
-	}
-
-	if err := b.gate.Wait(ctx); err != nil {
-		return err
 	}
 
 	for _, sub := range subs {
@@ -195,7 +195,6 @@ func newSubscription(
 		for i := range sub.mailboxes {
 			sub.mailboxes[i] = make(chan workItem, cfg.buffer)
 		}
-		sub.startWorkers()
 	} else {
 		close(sub.done)
 	}
@@ -467,6 +466,7 @@ func (s *subscription) middlewareChain() func(Next) Next {
 	}
 }
 
+// HandlerPanicError wraps a recovered handler panic as an error value.
 type HandlerPanicError struct {
 	Value any
 }

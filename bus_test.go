@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -15,7 +16,7 @@ func TestPublishSubscribeTyped(t *testing.T) {
 	bus := New()
 
 	got := make(chan int, 1)
-	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+	unsubscribe, err := Subscribe(bus, func(_ context.Context, event Event[int]) error {
 		got <- event.Value
 		return nil
 	})
@@ -44,7 +45,7 @@ func TestTypeIsolation(t *testing.T) {
 	var ints atomic.Int64
 	var strings atomic.Int64
 
-	unsubInt, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+	unsubInt, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 		ints.Add(1)
 		return nil
 	})
@@ -53,7 +54,7 @@ func TestTypeIsolation(t *testing.T) {
 	}
 	defer unsubInt()
 
-	unsubString, err := Subscribe(bus, func(ctx context.Context, event Event[string]) error {
+	unsubString, err := Subscribe(bus, func(_ context.Context, _ Event[string]) error {
 		strings.Add(1)
 		return nil
 	})
@@ -82,7 +83,7 @@ func TestSubscribeMatch(t *testing.T) {
 
 	unsubscribe, err := SubscribeMatch(bus, func(event Event[int]) bool {
 		return event.Value%2 == 0
-	}, func(ctx context.Context, event Event[int]) error {
+	}, func(_ context.Context, event Event[int]) error {
 		mu.Lock()
 		defer mu.Unlock()
 		got = append(got, event.Value)
@@ -120,7 +121,7 @@ func TestMiddlewareWrapsHandler(t *testing.T) {
 		t.Fatalf("Use() error = %v", err)
 	}
 
-	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+	unsubscribe, err := Subscribe(bus, func(_ context.Context, event Event[int]) error {
 		calls = append(calls, "handler")
 		return nil
 	})
@@ -156,7 +157,7 @@ func TestMiddlewareCanTransformDispatch(t *testing.T) {
 	}
 
 	got := make(chan Event[string], 1)
-	unsubscribe, err := SubscribeTopic(bus, "source.topic", func(ctx context.Context, event Event[string]) error {
+	unsubscribe, err := SubscribeTopic(bus, "source.topic", func(_ context.Context, event Event[string]) error {
 		got <- event
 		return nil
 	})
@@ -191,7 +192,7 @@ func TestWithMiddlewareRegistersGlobalMiddleware(t *testing.T) {
 		}
 	}))
 
-	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+	unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 		calls = append(calls, "handler")
 		return nil
 	})
@@ -228,7 +229,7 @@ func TestMiddlewareDoesNotAffectPublishHooksOrRouting(t *testing.T) {
 		}),
 	)
 
-	unsubscribe, err := SubscribeTopic(bus, "original.topic", func(ctx context.Context, event Event[string]) error {
+	unsubscribe, err := SubscribeTopic(bus, "original.topic", func(_ context.Context, event Event[string]) error {
 		got <- event
 		return nil
 	})
@@ -285,7 +286,7 @@ func TestMiddlewareDoesNotRewriteHandlerErrorHooks(t *testing.T) {
 		}),
 	)
 
-	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+	unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 		return errors.New("boom")
 	})
 	if err != nil {
@@ -799,6 +800,106 @@ func TestCloseRejectsNewPublishAndDrainsAsync(t *testing.T) {
 	err = Publish(context.Background(), bus, 99)
 	if !errors.Is(err, ErrClosed) {
 		t.Fatalf("publish after close error = %v, want ErrClosed", err)
+	}
+}
+
+func TestCloseWaitsForInFlightPublishBeforeStoppingSubscriptions(t *testing.T) {
+	bus := New()
+
+	predicateEntered := make(chan struct{}, 1)
+	releasePredicate := make(chan struct{})
+	delivered := make(chan int, 1)
+
+	unsubscribe, err := SubscribeMatch(bus, func(event Event[int]) bool {
+		select {
+		case predicateEntered <- struct{}{}:
+		default:
+		}
+		<-releasePredicate
+		return true
+	}, func(ctx context.Context, event Event[int]) error {
+		delivered <- event.Value
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeMatch() error = %v", err)
+	}
+	defer unsubscribe()
+
+	publishDone := make(chan error, 1)
+	go func() {
+		publishDone <- Publish(context.Background(), bus, 42)
+	}()
+
+	select {
+	case <-predicateEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for in-flight publish to reach predicate")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- bus.Close(context.Background())
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	close(releasePredicate)
+
+	select {
+	case value := <-delivered:
+		if value != 42 {
+			t.Fatalf("delivered value = %d, want 42", value)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for in-flight publish delivery")
+	}
+
+	select {
+	case err := <-publishDone:
+		if err != nil {
+			t.Fatalf("Publish() error = %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for publish completion")
+	}
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close() error = %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for close completion")
+	}
+}
+
+func TestAsyncSubscribeAfterCloseDoesNotLeakWorkers(t *testing.T) {
+	bus := New()
+	if err := bus.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	before := runtime.NumGoroutine()
+
+	for range 20 {
+		unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+			return nil
+		}, Async(), WithParallelism(3), WithBuffer(8))
+		if !errors.Is(err, ErrClosed) {
+			t.Fatalf("Subscribe() error = %v, want ErrClosed", err)
+		}
+		if unsubscribe != nil {
+			t.Fatal("unsubscribe = non-nil, want nil")
+		}
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	runtime.GC()
+	time.Sleep(50 * time.Millisecond)
+
+	after := runtime.NumGoroutine()
+	if delta := after - before; delta > 2 {
+		t.Fatalf("goroutines leaked after failed async subscribe attempts: before=%d after=%d", before, after)
 	}
 }
 

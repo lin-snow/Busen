@@ -17,7 +17,7 @@ func BenchmarkPublishSync(b *testing.B) {
 		b.Run(fmt.Sprintf("subs_%d", subs), func(b *testing.B) {
 			bus := New()
 			for range subs {
-				unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+				unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 					return nil
 				})
 				if err != nil {
@@ -42,7 +42,7 @@ func BenchmarkPublishAsyncSequential(b *testing.B) {
 	bus := New()
 	var processed atomic.Int64
 
-	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+	unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 		processed.Add(1)
 		return nil
 	}, Async(), Sequential(), WithBuffer(4096))
@@ -82,7 +82,7 @@ func BenchmarkPublishWithHooks(b *testing.B) {
 
 		b.Run(name, func(b *testing.B) {
 			bus := New(opts...)
-			unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+			unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 				return nil
 			})
 			if err != nil {
@@ -120,7 +120,7 @@ func BenchmarkPublishWithMiddleware(b *testing.B) {
 		}
 
 		b.Run(name, func(b *testing.B) {
-			unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+			unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 				return nil
 			})
 			if err != nil {
@@ -153,7 +153,7 @@ func BenchmarkPublishWithMiddlewareAndHooks(b *testing.B) {
 		}),
 	)
 
-	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+	unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 		return nil
 	})
 	if err != nil {
@@ -184,7 +184,7 @@ func BenchmarkPublishTopic(b *testing.B) {
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
 			bus := New()
-			unsubscribe, err := SubscribeTopic(bus, tc.pattern, func(ctx context.Context, event Event[int]) error {
+			unsubscribe, err := SubscribeTopic(bus, tc.pattern, func(_ context.Context, _ Event[int]) error {
 				return nil
 			})
 			if err != nil {
@@ -208,7 +208,7 @@ func BenchmarkPublishAsyncKeyed(b *testing.B) {
 	bus := New()
 	var processed atomic.Int64
 
-	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+	unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
 		processed.Add(1)
 		return nil
 	}, Async(), WithParallelism(4), WithBuffer(4096))
@@ -237,7 +237,7 @@ func BenchmarkPublishAsyncKeyedTopic(b *testing.B) {
 	bus := New()
 	var processed atomic.Int64
 
-	unsubscribe, err := SubscribeTopic(bus, "orders.>", func(ctx context.Context, event Event[int]) error {
+	unsubscribe, err := SubscribeTopic(bus, "orders.>", func(_ context.Context, _ Event[int]) error {
 		processed.Add(1)
 		return nil
 	}, Async(), WithParallelism(4), WithBuffer(4096))

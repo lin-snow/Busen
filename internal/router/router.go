@@ -1,3 +1,4 @@
+// Package router compiles and evaluates topic matchers for Busen routing.
 package router
 
 import (
@@ -5,12 +6,15 @@ import (
 	"strings"
 )
 
+// ErrInvalidPattern reports an invalid topic pattern.
 var ErrInvalidPattern = errors.New("invalid topic pattern")
 
+// Matcher reports whether a topic matches a compiled pattern.
 type Matcher interface {
 	Match(topic string) bool
 }
 
+// Compile parses a topic pattern into a matcher.
 func Compile(pattern string) (Matcher, error) {
 	segments, err := split(pattern)
 	if err != nil {
@@ -47,12 +51,14 @@ func Compile(pattern string) (Matcher, error) {
 
 type exactMatcher string
 
+// Match reports whether the topic exactly equals the compiled pattern.
 func (m exactMatcher) Match(topic string) bool {
 	return string(m) == topic
 }
 
 type wildcardMatcher []string
 
+// Match reports whether the topic satisfies the compiled wildcard pattern.
 func (m wildcardMatcher) Match(topic string) bool {
 	pi := 0
 	ti := 0
