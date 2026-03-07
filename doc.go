@@ -8,6 +8,7 @@
 //   - asynchronous delivery uses bounded queues with explicit backpressure
 //   - hooks expose runtime events without introducing a heavy framework layer
 //   - middleware wraps local dispatch without turning the package into a framework
+//   - the package stays focused on simple in-process application use
 //
 // Type-based subscriptions use exact Go types. A subscription registered for
 // one type does not receive values of another type, even if they satisfy the

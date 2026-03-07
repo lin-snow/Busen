@@ -21,6 +21,7 @@ Verify that:
 - Public API changes are documented
 - `README.md` and governance docs are up to date when needed
 - The version tag follows the `vX.Y.Z` format
+- The release workflow assumptions in `.github/workflows/release.yml` still match the repository setup
 
 ## Create a Release
 
@@ -39,6 +40,8 @@ git push origin v0.1.0
 
 4. Wait for the GitHub release workflow to run.
 5. Review the generated GitHub Release notes and edit them if needed.
+
+The GitHub release workflow will re-run lint, formatting, vet, unit tests, and race tests before creating the release.
 
 ## Pre-release Tags
 

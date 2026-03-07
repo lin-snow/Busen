@@ -60,6 +60,13 @@ Before submitting a pull request, please make sure:
 - `README.md` and other docs are updated if the public API or workflow changes
 - The pull request description explains the motivation, not only the code diff
 
+Related project docs:
+
+- Support: `SUPPORT.md`
+- Security reporting: `SECURITY.md`
+- Release flow: `RELEASING.md`
+- Governance and scope: `GOVERNANCE.md`
+
 ## Commit Messages
 
 There is no strict commit format requirement, but concise, imperative messages are preferred. Examples:

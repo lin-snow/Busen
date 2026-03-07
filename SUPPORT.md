@@ -22,3 +22,9 @@ Support requests are easier to answer when they include:
 ## Project Scope
 
 `Busen` is an in-process event bus for Go. Questions or requests related to persistence, replay, or distributed transport may be out of scope for the core library, even if they are valid use cases in adjacent systems.
+
+See also:
+
+- `README.md` for package positioning and usage
+- `CONTRIBUTING.md` for contribution workflow
+- `SECURITY.md` for private vulnerability reporting
