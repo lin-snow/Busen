@@ -300,26 +300,26 @@ go test ./... -run '^$' -bench . -benchmem
 
 这些数字代表的是 **in-process event bus 的热路径开销**，不是消息系统吞吐保证。
 
-在一台 Apple M4 机器上的一轮参考结果大致为：
+在一台使用 Go `1.26.0` 的 Apple M4 机器上的一轮参考结果大致为：
 
 | 场景 | 参考耗时 |
 | --- | --- |
-| sync publish（1 subscriber） | 约 `111 ns/op` |
-| sync publish（10 subscribers） | 约 `575 ns/op` |
-| async sequential publish | 约 `200 ns/op` |
-| async keyed publish | 约 `273 ns/op` |
+| sync publish（1 subscriber） | 约 `119 ns/op` |
+| sync publish（10 subscribers） | 约 `566 ns/op` |
+| async sequential publish | 约 `228 ns/op` |
+| async keyed publish | 约 `298 ns/op` |
 | middleware-enabled publish | 约 `111 ns/op` |
-| middleware + hooks publish | 约 `127 ns/op` |
-| async keyed + topic publish | 约 `290 ns/op` |
+| middleware + hooks publish | 约 `136 ns/op` |
+| async keyed + topic publish | 约 `298 ns/op` |
 | exact topic publish | 约 `127 ns/op` |
-| wildcard topic publish | 约 `131 ns/op` |
+| wildcard topic publish | 约 `134 ns/op` |
 
 这一轮里，router matcher 依然保持 `0 allocs/op`：
 
 | matcher | 参考耗时 | 分配 |
 | --- | --- | --- |
-| exact matcher | 约 `1.5 ns/op` | `0 allocs/op` |
-| wildcard matcher | 约 `6.1 ns/op` | `0 allocs/op` |
+| exact matcher | 约 `1.8 ns/op` | `0 allocs/op` |
+| wildcard matcher | 约 `6.2 ns/op` | `0 allocs/op` |
 
 ## 设计边界
 
