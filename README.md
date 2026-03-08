@@ -387,6 +387,7 @@ go test ./... -run '^$' -bench . -benchmem
 - 不保证全局顺序，只保证局部顺序语义
 - sync handler 错误会直接返回给 `Publish`
 - async handler error / panic 不回传给 `Publish`，应通过 `Hooks` 观测
+- Busen 保证的是分发链路并发安全，不保证 `event.Value`（`any`）内部可变对象的线程安全；建议发布后视为不可变，或由业务自行拷贝/加锁
 - `Close(ctx)` 超时表示未在期限内 drain 完成，不会强制终止用户 handler
 - 这是 in-process event bus，不是 distributed event platform
 
