@@ -7,7 +7,40 @@ and this project follows semantic versioning once stable releases begin.
 
 ## [Unreleased]
 
-- No unreleased changes yet.
+### Added
+
+- Added optional structured envelope metadata support via
+  `WithMetadataBuilder(...)` and per-publish `WithMetadata(...)`.
+- Added `Observation` / `Observer` and `UseObserver(...)` for bridge-style
+  cross-cutting observation of accepted deliveries.
+- Added observer filter options: `ObserveType[T]()`, `ObserveTopic(...)`,
+  `ObserveMetadata(...)`, and `ObserveMatch(...)`.
+- Added explicit shutdown modes with structured outcomes:
+  `ShutdownDrain`, `ShutdownBestEffort`, `ShutdownAbort`, and
+  `ShutdownResult`.
+- Added `Hooks.OnEventRejected` and `RejectedEvent` for async fail-fast
+  rejection observation.
+- Added extra drop/reject diagnostics in hook payloads, including
+  `SubscriberID`, queue length/capacity, and mailbox index.
+- Added examples covering metadata builder usage, observer usage, and shutdown
+  modes.
+- Added benchmarks for metadata and observer enabled/disabled overhead.
+
+### Changed
+
+- Updated `Close(ctx)` implementation to delegate to
+  `Shutdown(ctx, ShutdownDrain)` while preserving close semantics.
+- Renamed observer-facing API to shorter names:
+  `DispatchObservation` -> `Observation`,
+  `DispatchObserver` -> `Observer`,
+  `UseDispatchObserver(...)` -> `UseObserver(...)`.
+- Refreshed `README.md` structure with expanded quick overview, consolidated
+  "核心优势与能力", observer terminology, and updated benchmark reference values.
+
+### Fixed
+
+- Clarified observer-related comments and validation error wording for naming
+  consistency.
 
 ## [v0.2.0] - 2026-03-08
 

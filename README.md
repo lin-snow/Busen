@@ -348,30 +348,30 @@ go test ./... -run '^$' -bench . -benchmem
 
 | 场景 | 参考耗时 |
 | --- | --- |
-| sync publish（1 subscriber） | 约 `137 ns/op` |
-| sync publish（10 subscribers） | 约 `645 ns/op` |
-| async sequential publish | 约 `235 ns/op` |
-| async keyed publish | 约 `281 ns/op` |
-| middleware-enabled publish | 约 `148 ns/op` |
-| middleware + hooks publish | 约 `160 ns/op` |
-| async keyed + topic publish | 约 `293 ns/op` |
-| exact topic publish | 约 `146 ns/op` |
-| wildcard topic publish | 约 `161 ns/op` |
+| sync publish（1 subscriber） | 约 `147 ns/op` |
+| sync publish（10 subscribers） | 约 `659 ns/op` |
+| async sequential publish | 约 `238 ns/op` |
+| async keyed publish | 约 `285 ns/op` |
+| middleware-enabled publish | 约 `129 ns/op` |
+| middleware + hooks publish | 约 `147 ns/op` |
+| async keyed + topic publish | 约 `299 ns/op` |
+| exact topic publish | 约 `158 ns/op` |
+| wildcard topic publish | 约 `151 ns/op` |
 
 这一轮里，router matcher 依然保持 `0 allocs/op`：
 
 | matcher | 参考耗时 | 分配 |
 | --- | --- | --- |
-| exact matcher | 约 `1.6 ns/op` | `0 allocs/op` |
-| wildcard matcher | 约 `6.1 ns/op` | `0 allocs/op` |
+| exact matcher | 约 `1.5 ns/op` | `0 allocs/op` |
+| wildcard matcher | 约 `6.3 ns/op` | `0 allocs/op` |
 
 新增能力（metadata / observer）的一轮参考结果如下：
 
 | 场景 | 参考耗时 | 分配 |
 | --- | --- | --- |
-| publish with metadata（disabled） | 约 `134 ns/op` | `288 B/op`, `4 allocs/op` |
-| publish with metadata（enabled） | 约 `868 ns/op` | `2640 B/op`, `18 allocs/op` |
-| publish with observer（disabled） | 约 `163 ns/op` | `312 B/op`, `5 allocs/op` |
+| publish with metadata（disabled） | 约 `126 ns/op` | `288 B/op`, `4 allocs/op` |
+| publish with metadata（enabled） | 约 `780 ns/op` | `2640 B/op`, `18 allocs/op` |
+| publish with observer（disabled） | 约 `149 ns/op` | `312 B/op`, `5 allocs/op` |
 | publish with observer（enabled） | 约 `187 ns/op` | `376 B/op`, `6 allocs/op` |
 
 说明：
