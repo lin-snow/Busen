@@ -10,6 +10,8 @@ type Event[T any] struct {
 	Value T
 	// Headers contains a shallow copy of publish headers visible to handlers.
 	Headers map[string]string
+	// Meta contains structured envelope metadata visible to handlers.
+	Meta map[string]string
 }
 
 type envelope struct {
@@ -17,6 +19,7 @@ type envelope struct {
 	key     string
 	value   any
 	headers map[string]string
+	meta    map[string]string
 }
 
 func typedEvent[T any](e envelope) Event[T] {
@@ -25,6 +28,7 @@ func typedEvent[T any](e envelope) Event[T] {
 		Key:     e.key,
 		Value:   e.value.(T),
 		Headers: cloneHeaders(e.headers),
+		Meta:    cloneHeaders(e.meta),
 	}
 }
 

@@ -233,3 +233,103 @@ func ExampleWithHooks() {
 	// handled u-1
 	// matched=1 delivered=1
 }
+
+func ExampleWithMetadataBuilder() {
+	type OrderCreated struct {
+		ID string
+	}
+
+	b := busen.New(
+		busen.WithMetadataBuilder(func(input busen.PublishMetadataInput) map[string]string {
+			return map[string]string{
+				"source": "billing",
+			}
+		}),
+	)
+
+	unsubscribe, err := busen.Subscribe(b, func(_ context.Context, event busen.Event[OrderCreated]) error {
+		fmt.Printf("%s from %s\n", event.Value.ID, event.Meta["source"])
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer unsubscribe()
+
+	if err := busen.Publish(
+		context.Background(),
+		b,
+		OrderCreated{ID: "o-1"},
+		busen.WithMetadata(map[string]string{"trace_id": "tr-1"}),
+	); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := b.Close(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+
+	// Output:
+	// o-1 from billing
+}
+
+func ExampleBus_UseObserver() {
+	type OrderCreated struct {
+		ID string
+	}
+
+	b := busen.New()
+	if err := b.UseObserver(
+		func(_ context.Context, obs busen.Observation) {
+			fmt.Printf("observe %s %v\n", obs.Topic, obs.EventType)
+		},
+		busen.ObserveTopic("orders.>"),
+	); err != nil {
+		log.Fatal(err)
+	}
+
+	unsubscribe, err := busen.SubscribeTopic(b, "orders.>", func(_ context.Context, event busen.Event[OrderCreated]) error {
+		return nil
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer unsubscribe()
+
+	if err := busen.Publish(context.Background(), b, OrderCreated{ID: "o-1"}, busen.WithTopic("orders.created")); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := b.Close(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+
+	// Output:
+	// observe orders.created busen_test.OrderCreated
+}
+
+func ExampleBus_Shutdown() {
+	type Job struct {
+		ID int
+	}
+
+	b := busen.New()
+	unsubscribe, err := busen.Subscribe(b, func(_ context.Context, _ busen.Event[Job]) error {
+		return nil
+	}, busen.Async(), busen.WithBuffer(8))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer unsubscribe()
+
+	_ = busen.Publish(context.Background(), b, Job{ID: 1})
+
+	result, err := b.Shutdown(context.Background(), busen.ShutdownDrain)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(result.Mode == busen.ShutdownDrain, result.Completed)
+
+	// Output:
+	// true true
+}

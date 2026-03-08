@@ -25,6 +25,8 @@ type Dispatch struct {
 	Key string
 	// Headers is a mutable copy of the publish headers for this handler call.
 	Headers map[string]string
+	// Meta is mutable structured metadata for this handler call.
+	Meta map[string]string
 	// Value is the event payload that will be passed to the typed handler.
 	Value any
 	// Async reports whether the target subscription is asynchronous.

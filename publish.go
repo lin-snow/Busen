@@ -31,12 +31,14 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 	}
 
 	eventType := reflect.TypeFor[T]()
+	meta := b.buildMetadata(ctx, eventType, value, cfg)
 	if b.hooks.OnPublishStart != nil {
 		info := PublishStart{
 			EventType: eventType,
 			Topic:     cfg.topic,
 			Key:       cfg.key,
 			Headers:   cloneHeaders(cfg.headers),
+			Meta:      cloneHeaders(meta),
 		}
 		safeCall("OnPublishStart", hookPanicReporter(&b.hooks), func() { b.hooks.OnPublishStart(info) })
 	}
@@ -49,6 +51,7 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 				Topic:                cfg.topic,
 				Key:                  cfg.key,
 				Headers:              cloneHeaders(cfg.headers),
+				Meta:                 cloneHeaders(meta),
 				MatchedSubscribers:   0,
 				DeliveredSubscribers: 0,
 			}
@@ -62,6 +65,7 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 		key:     cfg.key,
 		value:   value,
 		headers: cloneHeaders(cfg.headers),
+		meta:    cloneHeaders(meta),
 	}
 
 	var errs []error
@@ -75,6 +79,16 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 		accepted, deliverErr := sub.deliver(ctx, env)
 		if accepted {
 			delivered++
+			b.notifyObservers(ctx, Observation{
+				EventType:    eventType,
+				Topic:        env.topic,
+				Key:          env.key,
+				Headers:      cloneHeaders(env.headers),
+				Meta:         cloneHeaders(env.meta),
+				Value:        env.value,
+				Async:        sub.async,
+				SubscriberID: sub.id,
+			})
 		}
 		if deliverErr != nil {
 			errs = append(errs, deliverErr)
@@ -88,6 +102,7 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 			Topic:                cfg.topic,
 			Key:                  cfg.key,
 			Headers:              cloneHeaders(cfg.headers),
+			Meta:                 cloneHeaders(meta),
 			MatchedSubscribers:   matched,
 			DeliveredSubscribers: delivered,
 			Err:                  err,
@@ -96,4 +111,29 @@ func Publish[T any](ctx context.Context, b *Bus, value T, opts ...PublishOption)
 	}
 
 	return err
+}
+
+func (b *Bus) buildMetadata(ctx context.Context, eventType reflect.Type, value any, cfg publishConfig) map[string]string {
+	meta := cloneHeaders(cfg.meta)
+	if b.cfg.metadataBuilder == nil {
+		return meta
+	}
+
+	input := PublishMetadataInput{
+		Context:   ctx,
+		EventType: eventType,
+		Topic:     cfg.topic,
+		Key:       cfg.key,
+		Headers:   cloneHeaders(cfg.headers),
+		Value:     value,
+	}
+	for k, v := range b.cfg.metadataBuilder(input) {
+		if meta == nil {
+			meta = make(map[string]string)
+		}
+		if _, exists := meta[k]; !exists {
+			meta[k] = v
+		}
+	}
+	return meta
 }

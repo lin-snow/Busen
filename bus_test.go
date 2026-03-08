@@ -1166,6 +1166,159 @@ func TestCloseTimeoutReportsIncompleteDrain(t *testing.T) {
 	}
 }
 
+func TestShutdownDrainReturnsStructuredStats(t *testing.T) {
+	bus := New()
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}, Async(), WithBuffer(1), WithOverflow(OverflowDropNewest))
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, 1); err != nil {
+		t.Fatalf("first publish error = %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for handler start")
+	}
+
+	if err := Publish(context.Background(), bus, 2); err != nil {
+		t.Fatalf("second publish error = %v", err)
+	}
+	err = Publish(context.Background(), bus, 3)
+	if !errors.Is(err, ErrDropped) {
+		t.Fatalf("third publish error = %v, want ErrDropped", err)
+	}
+
+	close(release)
+	result, err := bus.Shutdown(context.Background(), ShutdownDrain)
+	if err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if !result.Completed {
+		t.Fatalf("Completed = false, want true")
+	}
+	if result.Mode != ShutdownDrain {
+		t.Fatalf("Mode = %v, want ShutdownDrain", result.Mode)
+	}
+	if result.Processed < 2 {
+		t.Fatalf("Processed = %d, want >= 2", result.Processed)
+	}
+	if result.Dropped < 0 {
+		t.Fatalf("Dropped = %d, want >= 0", result.Dropped)
+	}
+	if len(result.TimedOutSubscribers) != 0 {
+		t.Fatalf("TimedOutSubscribers = %v, want empty", result.TimedOutSubscribers)
+	}
+}
+
+func TestShutdownBestEffortReturnsTimeoutSubscribers(t *testing.T) {
+	bus := New()
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}, Async(), WithBuffer(1))
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, 1); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for handler start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	result, err := bus.Shutdown(ctx, ShutdownBestEffort)
+	if err != nil {
+		t.Fatalf("Shutdown() error = %v, want nil", err)
+	}
+	if result.Completed {
+		t.Fatalf("Completed = true, want false")
+	}
+	if len(result.TimedOutSubscribers) == 0 {
+		t.Fatal("TimedOutSubscribers is empty, want non-empty")
+	}
+
+	close(release)
+}
+
+func TestShutdownAbortDropsQueuedEvents(t *testing.T) {
+	bus := New()
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}, Async(), WithBuffer(4))
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	for i := range 3 {
+		if err := Publish(context.Background(), bus, i); err != nil {
+			t.Fatalf("Publish(%d) error = %v", i, err)
+		}
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for handler start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	result, err := bus.Shutdown(ctx, ShutdownAbort)
+	if err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if result.Dropped < 1 {
+		t.Fatalf("Dropped = %d, want >= 1", result.Dropped)
+	}
+	if result.Completed {
+		t.Fatalf("Completed = true, want false")
+	}
+	if len(result.TimedOutSubscribers) == 0 {
+		t.Fatal("TimedOutSubscribers is empty, want non-empty")
+	}
+
+	close(release)
+}
+
 func TestPublishHooks(t *testing.T) {
 	startCh := make(chan PublishStart, 1)
 	doneCh := make(chan PublishDone, 1)
@@ -1447,9 +1600,207 @@ func TestDropHookFiresOnDropNewest(t *testing.T) {
 		if info.Policy != OverflowDropNewest {
 			t.Fatalf("drop hook policy = %v, want OverflowDropNewest", info.Policy)
 		}
+		if info.SubscriberID == 0 {
+			t.Fatal("drop hook SubscriberID = 0, want non-zero")
+		}
+		if info.QueueCap != 1 {
+			t.Fatalf("drop hook QueueCap = %d, want 1", info.QueueCap)
+		}
+		if info.QueueLen < 0 || info.QueueLen > info.QueueCap {
+			t.Fatalf("drop hook QueueLen = %d, want [0,%d]", info.QueueLen, info.QueueCap)
+		}
+		if info.MailboxIndex != 0 {
+			t.Fatalf("drop hook MailboxIndex = %d, want 0", info.MailboxIndex)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for drop hook")
 	}
 
 	close(release)
+}
+
+func TestRejectHookFiresOnFailFast(t *testing.T) {
+	rejectCh := make(chan RejectedEvent, 1)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	bus := New(WithHooks(Hooks{
+		OnEventRejected: func(info RejectedEvent) {
+			rejectCh <- info
+		},
+	}))
+
+	unsubscribe, err := Subscribe(bus, func(ctx context.Context, event Event[int]) error {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil
+	}, Async(), WithBuffer(1), WithOverflow(OverflowFailFast))
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, 1); err != nil {
+		t.Fatalf("first publish error = %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for handler start")
+	}
+
+	if err := Publish(context.Background(), bus, 2); err != nil {
+		t.Fatalf("second publish error = %v", err)
+	}
+
+	err = Publish(context.Background(), bus, 3)
+	if !errors.Is(err, ErrBufferFull) {
+		t.Fatalf("third publish error = %v, want ErrBufferFull", err)
+	}
+
+	select {
+	case info := <-rejectCh:
+		if info.Policy != OverflowFailFast {
+			t.Fatalf("reject hook policy = %v, want OverflowFailFast", info.Policy)
+		}
+		if !errors.Is(info.Reason, ErrBufferFull) {
+			t.Fatalf("reject hook reason = %v, want ErrBufferFull", info.Reason)
+		}
+		if info.SubscriberID == 0 {
+			t.Fatal("reject hook SubscriberID = 0, want non-zero")
+		}
+		if info.QueueCap != 1 {
+			t.Fatalf("reject hook QueueCap = %d, want 1", info.QueueCap)
+		}
+		if info.QueueLen < 0 || info.QueueLen > info.QueueCap {
+			t.Fatalf("reject hook QueueLen = %d, want [0,%d]", info.QueueLen, info.QueueCap)
+		}
+		if info.MailboxIndex != 0 {
+			t.Fatalf("reject hook MailboxIndex = %d, want 0", info.MailboxIndex)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reject hook")
+	}
+
+	close(release)
+}
+
+func TestMetadataBuilderAndPublishOverride(t *testing.T) {
+	startCh := make(chan PublishStart, 1)
+	got := make(chan Event[int], 1)
+
+	bus := New(
+		WithMetadataBuilder(func(input PublishMetadataInput) map[string]string {
+			if input.Topic == "orders.created" {
+				return map[string]string{
+					"source": "builder",
+					"trace":  "builder-trace",
+				}
+			}
+			return nil
+		}),
+		WithHooks(Hooks{
+			OnPublishStart: func(info PublishStart) {
+				startCh <- info
+			},
+		}),
+	)
+
+	unsubscribe, err := SubscribeTopic(bus, "orders.>", func(ctx context.Context, event Event[int]) error {
+		got <- event
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTopic() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := Publish(context.Background(), bus, 7,
+		WithTopic("orders.created"),
+		WithMetadata(map[string]string{"trace": "manual-trace"}),
+	); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	select {
+	case info := <-startCh:
+		if info.Meta["source"] != "builder" {
+			t.Fatalf("publish start meta source = %q, want builder", info.Meta["source"])
+		}
+		if info.Meta["trace"] != "manual-trace" {
+			t.Fatalf("publish start meta trace = %q, want manual-trace", info.Meta["trace"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for publish start")
+	}
+
+	select {
+	case event := <-got:
+		if event.Meta["source"] != "builder" {
+			t.Fatalf("event meta source = %q, want builder", event.Meta["source"])
+		}
+		if event.Meta["trace"] != "manual-trace" {
+			t.Fatalf("event meta trace = %q, want manual-trace", event.Meta["trace"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for subscribed event")
+	}
+}
+
+func TestObserverFilterAndPayload(t *testing.T) {
+	bus := New()
+
+	var observed []Observation
+	var mu sync.Mutex
+	if err := bus.UseObserver(func(ctx context.Context, obs Observation) {
+		mu.Lock()
+		defer mu.Unlock()
+		observed = append(observed, obs)
+	}, ObserveType[int](), ObserveTopic("orders.>"), ObserveMetadata(map[string]string{"trace": "trace-1"})); err != nil {
+		t.Fatalf("UseObserver() error = %v", err)
+	}
+
+	unsubscribeOrders, err := SubscribeTopic(bus, "orders.>", func(ctx context.Context, event Event[int]) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTopic(orders) error = %v", err)
+	}
+	defer unsubscribeOrders()
+
+	unsubscribePayments, err := SubscribeTopic(bus, "payments.>", func(ctx context.Context, event Event[int]) error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SubscribeTopic(payments) error = %v", err)
+	}
+	defer unsubscribePayments()
+
+	if err := Publish(context.Background(), bus, 1, WithTopic("payments.created"), WithMetadata(map[string]string{"trace": "trace-1"})); err != nil {
+		t.Fatalf("Publish(payments) error = %v", err)
+	}
+	if err := Publish(context.Background(), bus, 2, WithTopic("orders.created"), WithMetadata(map[string]string{"trace": "trace-2"})); err != nil {
+		t.Fatalf("Publish(orders non-match meta) error = %v", err)
+	}
+	if err := Publish(context.Background(), bus, 3, WithTopic("orders.created"), WithMetadata(map[string]string{"trace": "trace-1"})); err != nil {
+		t.Fatalf("Publish(orders match) error = %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(observed) != 1 {
+		t.Fatalf("observed count = %d, want 1", len(observed))
+	}
+	if observed[0].Topic != "orders.created" {
+		t.Fatalf("observed topic = %q, want orders.created", observed[0].Topic)
+	}
+	if observed[0].Meta["trace"] != "trace-1" {
+		t.Fatalf("observed meta trace = %q, want trace-1", observed[0].Meta["trace"])
+	}
+	if observed[0].SubscriberID == 0 {
+		t.Fatal("observed SubscriberID = 0, want non-zero")
+	}
 }

@@ -171,6 +171,77 @@ func BenchmarkPublishWithMiddlewareAndHooks(b *testing.B) {
 	}
 }
 
+func BenchmarkPublishWithMetadata(b *testing.B) {
+	for _, enabled := range []bool{false, true} {
+		name := "disabled"
+		bus := New()
+		opts := []PublishOption(nil)
+		if enabled {
+			name = "enabled"
+			bus = New(WithMetadataBuilder(func(PublishMetadataInput) map[string]string {
+				return map[string]string{
+					"source": "bench",
+				}
+			}))
+			opts = append(opts, WithMetadata(map[string]string{"trace_id": "bench-trace"}))
+		}
+
+		b.Run(name, func(b *testing.B) {
+			unsubscribe, err := Subscribe(bus, func(_ context.Context, _ Event[int]) error {
+				return nil
+			})
+			if err != nil {
+				b.Fatalf("Subscribe() error = %v", err)
+			}
+			defer unsubscribe()
+
+			ctx := context.Background()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if err := Publish(ctx, bus, i, opts...); err != nil {
+					b.Fatalf("Publish() error = %v", err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkPublishWithObserver(b *testing.B) {
+	for _, enabled := range []bool{false, true} {
+		name := "disabled"
+		bus := New()
+		if enabled {
+			name = "enabled"
+			if err := bus.UseObserver(
+				func(_ context.Context, _ Observation) {},
+				ObserveTopic("orders.>"),
+			); err != nil {
+				b.Fatalf("UseObserver() error = %v", err)
+			}
+		}
+
+		b.Run(name, func(b *testing.B) {
+			unsubscribe, err := SubscribeTopic(bus, "orders.>", func(_ context.Context, _ Event[int]) error {
+				return nil
+			})
+			if err != nil {
+				b.Fatalf("SubscribeTopic() error = %v", err)
+			}
+			defer unsubscribe()
+
+			ctx := context.Background()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if err := Publish(ctx, bus, i, WithTopic("orders.created")); err != nil {
+					b.Fatalf("Publish() error = %v", err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkPublishTopic(b *testing.B) {
 	cases := []struct {
 		name    string

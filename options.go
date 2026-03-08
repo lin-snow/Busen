@@ -27,6 +27,7 @@ type config struct {
 	defaultOverflow OverflowPolicy
 	hooks           Hooks
 	middlewares     []Middleware
+	metadataBuilder MetadataBuilder
 }
 
 type subscribeConfig struct {
@@ -41,6 +42,7 @@ type publishConfig struct {
 	topic   string
 	key     string
 	headers map[string]string
+	meta    map[string]string
 }
 
 // Option configures a Bus.
@@ -131,6 +133,17 @@ func WithMiddleware(middlewares ...Middleware) Option {
 	})
 }
 
+// WithMetadataBuilder registers a global metadata builder for publish envelopes.
+func WithMetadataBuilder(builder MetadataBuilder) Option {
+	return optionFunc(func(cfg *config) error {
+		if builder == nil {
+			return fmt.Errorf("%w: metadata builder is nil", ErrInvalidOption)
+		}
+		cfg.metadataBuilder = builder
+		return nil
+	})
+}
+
 // WithTopic sets the routing topic for a published event.
 func WithTopic(topic string) PublishOption {
 	return publishOptionFunc(func(cfg *publishConfig) error {
@@ -155,6 +168,14 @@ func WithKey(key string) PublishOption {
 func WithHeaders(headers map[string]string) PublishOption {
 	return publishOptionFunc(func(cfg *publishConfig) error {
 		cfg.headers = cloneHeaders(headers)
+		return nil
+	})
+}
+
+// WithMetadata sets structured envelope metadata for a published event.
+func WithMetadata(meta map[string]string) PublishOption {
+	return publishOptionFunc(func(cfg *publishConfig) error {
+		cfg.meta = cloneHeaders(meta)
 		return nil
 	})
 }

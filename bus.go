@@ -23,8 +23,11 @@ type Bus struct {
 	middlewareMu sync.RWMutex
 	middlewares  []Middleware
 	middleware   func(Next) Next
+	observerMu   sync.RWMutex
+	observers    []observerEntry
 
 	middlewareVersion atomic.Uint64
+	observerCount     atomic.Uint64
 
 	nextID atomic.Uint64
 }
@@ -53,6 +56,11 @@ type subscription struct {
 	dispatchMu      sync.Mutex
 	dispatchVersion uint64
 	dispatchHandler Next
+
+	processedCount    atomic.Int64
+	droppedCount      atomic.Int64
+	rejectedCount     atomic.Int64
+	shutdownDropCount atomic.Int64
 }
 
 type workItem struct {
@@ -88,29 +96,8 @@ func New(opts ...Option) *Bus {
 // ErrCloseIncomplete and the context error. In that case, user handlers are not
 // forcefully canceled.
 func (b *Bus) Close(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	b.gate.Close()
-
-	subs := b.allSubscriptions()
-	if err := b.gate.Wait(ctx); err != nil {
-		return closeWaitError(err)
-	}
-
-	for _, sub := range subs {
-		sub.stopAccepting()
-		sub.scheduleStop()
-	}
-
-	for _, sub := range subs {
-		if err := sub.waitStopped(ctx); err != nil {
-			return closeWaitError(err)
-		}
-	}
-
-	return nil
+	_, err := b.Shutdown(ctx, ShutdownDrain)
+	return err
 }
 
 func (b *Bus) allSubscriptions() []*subscription {
@@ -253,7 +240,7 @@ func (s *subscription) deliver(ctx context.Context, env envelope) (bool, error) 
 
 func (s *subscription) enqueue(ctx context.Context, env envelope) error {
 	item := workItem{ctx: ctx, env: env}
-	mailbox := s.mailboxForKey(env.key)
+	mailbox, mailboxIndex := s.mailboxForKey(env.key)
 
 	switch s.overflow {
 	case OverflowBlock:
@@ -268,6 +255,7 @@ func (s *subscription) enqueue(ctx context.Context, env envelope) error {
 		case mailbox <- item:
 			return nil
 		default:
+			s.onRejected(env, ErrBufferFull, mailbox, mailboxIndex)
 			return ErrBufferFull
 		}
 	case OverflowDropNewest:
@@ -275,7 +263,7 @@ func (s *subscription) enqueue(ctx context.Context, env envelope) error {
 		case mailbox <- item:
 			return nil
 		default:
-			s.onDropped(env, ErrDropped)
+			s.onDropped(env, ErrDropped, mailbox, mailboxIndex)
 			return ErrDropped
 		}
 	case OverflowDropOldest:
@@ -290,7 +278,7 @@ func (s *subscription) enqueue(ctx context.Context, env envelope) error {
 
 		select {
 		case dropped := <-mailbox:
-			s.onDropped(dropped.env, ErrDropped)
+			s.onDropped(dropped.env, ErrDropped, mailbox, mailboxIndex)
 		default:
 			return ErrBufferFull
 		}
@@ -307,11 +295,14 @@ func (s *subscription) enqueue(ctx context.Context, env envelope) error {
 }
 
 func (s *subscription) callHandler(ctx context.Context, env envelope) (err error) {
+	defer s.processedCount.Add(1)
+
 	dispatch := Dispatch{
 		EventType: s.eventType,
 		Topic:     env.topic,
 		Key:       env.key,
 		Headers:   cloneHeaders(env.headers),
+		Meta:      cloneHeaders(env.meta),
 		Value:     env.value,
 		Async:     s.async,
 	}
@@ -326,6 +317,7 @@ func (s *subscription) callHandler(ctx context.Context, env envelope) (err error
 				key:     dispatch.Key,
 				value:   dispatch.Value,
 				headers: dispatch.Headers,
+				meta:    dispatch.Meta,
 			}, recovered)
 		}
 	}()
@@ -337,6 +329,7 @@ func (s *subscription) callHandler(ctx context.Context, env envelope) (err error
 			key:     dispatch.Key,
 			value:   dispatch.Value,
 			headers: dispatch.Headers,
+			meta:    dispatch.Meta,
 		}, err)
 	}
 	return err
@@ -404,6 +397,7 @@ func (s *subscription) onError(env envelope, err error) {
 		EventType: s.eventType,
 		Topic:     env.topic,
 		Key:       env.key,
+		Meta:      cloneHeaders(env.meta),
 		Async:     s.async,
 		Err:       err,
 	}
@@ -419,37 +413,110 @@ func (s *subscription) onPanic(env envelope, value any) {
 		EventType: s.eventType,
 		Topic:     env.topic,
 		Key:       env.key,
+		Meta:      cloneHeaders(env.meta),
 		Async:     s.async,
 		Value:     value,
 	}
 	safeCall("OnHandlerPanic", hookPanicReporter(&s.hooks), func() { s.hooks.OnHandlerPanic(info) })
 }
 
-func (s *subscription) onDropped(env envelope, reason error) {
+func (s *subscription) onDropped(env envelope, reason error, mailbox chan workItem, mailboxIndex int) {
 	if s.hooks.OnEventDropped == nil {
+		s.droppedCount.Add(1)
 		return
 	}
+	s.droppedCount.Add(1)
 
 	info := DroppedEvent{
-		EventType: s.eventType,
-		Topic:     env.topic,
-		Key:       env.key,
-		Async:     true,
-		Policy:    s.overflow,
-		Reason:    reason,
+		EventType:    s.eventType,
+		Topic:        env.topic,
+		Key:          env.key,
+		Meta:         cloneHeaders(env.meta),
+		Async:        true,
+		Policy:       s.overflow,
+		SubscriberID: s.id,
+		QueueLen:     len(mailbox),
+		QueueCap:     cap(mailbox),
+		MailboxIndex: mailboxIndex,
+		Reason:       reason,
 	}
 	safeCall("OnEventDropped", hookPanicReporter(&s.hooks), func() { s.hooks.OnEventDropped(info) })
 }
 
-func (s *subscription) mailboxForKey(key string) chan workItem {
+func (s *subscription) onRejected(env envelope, reason error, mailbox chan workItem, mailboxIndex int) {
+	if s.hooks.OnEventRejected == nil {
+		s.rejectedCount.Add(1)
+		return
+	}
+	s.rejectedCount.Add(1)
+
+	info := RejectedEvent{
+		EventType:    s.eventType,
+		Topic:        env.topic,
+		Key:          env.key,
+		Meta:         cloneHeaders(env.meta),
+		Async:        true,
+		Policy:       s.overflow,
+		SubscriberID: s.id,
+		QueueLen:     len(mailbox),
+		QueueCap:     cap(mailbox),
+		MailboxIndex: mailboxIndex,
+		Reason:       reason,
+	}
+	safeCall("OnEventRejected", hookPanicReporter(&s.hooks), func() { s.hooks.OnEventRejected(info) })
+}
+
+func (s *subscription) mailboxForKey(key string) (chan workItem, int) {
 	if len(s.mailboxes) == 1 {
-		return s.mailboxes[0]
+		return s.mailboxes[0], 0
 	}
 	if key != "" {
-		return s.mailboxes[int(hashString(key)%uint64(len(s.mailboxes)))]
+		idx := int(hashString(key) % uint64(len(s.mailboxes)))
+		return s.mailboxes[idx], idx
 	}
 	next := s.rr.Add(1) - 1
-	return s.mailboxes[int(next%uint64(len(s.mailboxes)))]
+	idx := int(next % uint64(len(s.mailboxes)))
+	return s.mailboxes[idx], idx
+}
+
+type subscriptionStats struct {
+	processed    int64
+	dropped      int64
+	rejected     int64
+	shutdownDrop int64
+}
+
+func (s *subscription) snapshotStats() subscriptionStats {
+	return subscriptionStats{
+		processed:    s.processedCount.Load(),
+		dropped:      s.droppedCount.Load(),
+		rejected:     s.rejectedCount.Load(),
+		shutdownDrop: s.shutdownDropCount.Load(),
+	}
+}
+
+func (s *subscription) abortPending() int64 {
+	if !s.async {
+		return 0
+	}
+
+	var dropped int64
+	for _, mailbox := range s.mailboxes {
+		for {
+			select {
+			case <-mailbox:
+				dropped++
+			default:
+				goto drained
+			}
+		}
+	drained:
+	}
+
+	if dropped > 0 {
+		s.shutdownDropCount.Add(dropped)
+	}
+	return dropped
 }
 
 func (s *subscription) invoke(ctx context.Context, dispatch Dispatch) error {
@@ -465,6 +532,7 @@ func (s *subscription) dispatch(ctx context.Context, dispatch Dispatch) Next {
 				key:     dispatch.Key,
 				value:   dispatch.Value,
 				headers: dispatch.Headers,
+				meta:    dispatch.Meta,
 			})
 		}
 	}
@@ -484,6 +552,7 @@ func (s *subscription) dispatch(ctx context.Context, dispatch Dispatch) Next {
 			key:     dispatch.Key,
 			value:   dispatch.Value,
 			headers: dispatch.Headers,
+			meta:    dispatch.Meta,
 		})
 	}
 

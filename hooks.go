@@ -20,6 +20,8 @@ type Hooks struct {
 	OnHandlerPanic func(HandlerPanic)
 	// OnEventDropped runs when async backpressure drops an event.
 	OnEventDropped func(DroppedEvent)
+	// OnEventRejected runs when async backpressure rejects an event.
+	OnEventRejected func(RejectedEvent)
 	// OnHookPanic runs when another hook panics and the panic is recovered.
 	OnHookPanic func(HookPanic)
 }
@@ -34,6 +36,8 @@ type PublishStart struct {
 	Key string
 	// Headers is a copy of the publish headers.
 	Headers map[string]string
+	// Meta is structured envelope metadata.
+	Meta map[string]string
 }
 
 // PublishDone describes the end of a publish operation.
@@ -46,6 +50,8 @@ type PublishDone struct {
 	Key string
 	// Headers is a copy of the publish headers.
 	Headers map[string]string
+	// Meta is structured envelope metadata.
+	Meta map[string]string
 	// MatchedSubscribers is the number of subscriptions whose routing constraints
 	// matched the published event.
 	MatchedSubscribers int
@@ -64,6 +70,8 @@ type HandlerError struct {
 	Topic string
 	// Key is the event ordering key seen by the handler.
 	Key string
+	// Meta is structured envelope metadata seen by the handler.
+	Meta map[string]string
 	// Async reports whether the handler ran in async mode.
 	Async bool
 	// Err is the error returned by the handler.
@@ -78,6 +86,8 @@ type HandlerPanic struct {
 	Topic string
 	// Key is the event ordering key seen by the handler.
 	Key string
+	// Meta is structured envelope metadata seen by the handler.
+	Meta map[string]string
 	// Async reports whether the handler ran in async mode.
 	Async bool
 	// Value is the recovered panic value.
@@ -92,11 +102,47 @@ type DroppedEvent struct {
 	Topic string
 	// Key is the event ordering key that was being delivered.
 	Key string
+	// Meta is structured envelope metadata for the dropped event.
+	Meta map[string]string
 	// Async is always true for dropped events.
 	Async bool
 	// Policy is the overflow policy that decided the drop behavior.
 	Policy OverflowPolicy
+	// SubscriberID is the internal subscription identifier.
+	SubscriberID uint64
+	// QueueLen is the queue length at observation time.
+	QueueLen int
+	// QueueCap is the queue capacity.
+	QueueCap int
+	// MailboxIndex is the selected worker mailbox index.
+	MailboxIndex int
 	// Reason reports why the event was dropped.
+	Reason error
+}
+
+// RejectedEvent describes an event rejected by backpressure policy.
+type RejectedEvent struct {
+	// EventType is the exact Go type that could not be queued.
+	EventType reflect.Type
+	// Topic is the event topic that was being delivered.
+	Topic string
+	// Key is the event ordering key that was being delivered.
+	Key string
+	// Meta is structured envelope metadata for the rejected event.
+	Meta map[string]string
+	// Async is always true for rejected events.
+	Async bool
+	// Policy is the overflow policy that rejected the event.
+	Policy OverflowPolicy
+	// SubscriberID is the internal subscription identifier.
+	SubscriberID uint64
+	// QueueLen is the queue length at observation time.
+	QueueLen int
+	// QueueCap is the queue capacity.
+	QueueCap int
+	// MailboxIndex is the selected worker mailbox index.
+	MailboxIndex int
+	// Reason reports why the event was rejected.
 	Reason error
 }
 
@@ -119,6 +165,7 @@ func mergeHooks(dst *Hooks, src Hooks) {
 	dst.OnHandlerError = chainHandlerError(dst, dst.OnHandlerError, src.OnHandlerError)
 	dst.OnHandlerPanic = chainHandlerPanic(dst, dst.OnHandlerPanic, src.OnHandlerPanic)
 	dst.OnEventDropped = chainDroppedEvent(dst, dst.OnEventDropped, src.OnEventDropped)
+	dst.OnEventRejected = chainRejectedEvent(dst, dst.OnEventRejected, src.OnEventRejected)
 }
 
 func chainPublishStart(dst *Hooks, a, b func(PublishStart)) func(PublishStart) {
@@ -187,6 +234,20 @@ func chainDroppedEvent(dst *Hooks, a, b func(DroppedEvent)) func(DroppedEvent) {
 		return func(info DroppedEvent) {
 			safeCall("OnEventDropped", hookPanicReporter(dst), func() { a(info) })
 			safeCall("OnEventDropped", hookPanicReporter(dst), func() { b(info) })
+		}
+	}
+}
+
+func chainRejectedEvent(dst *Hooks, a, b func(RejectedEvent)) func(RejectedEvent) {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	default:
+		return func(info RejectedEvent) {
+			safeCall("OnEventRejected", hookPanicReporter(dst), func() { a(info) })
+			safeCall("OnEventRejected", hookPanicReporter(dst), func() { b(info) })
 		}
 	}
 }
