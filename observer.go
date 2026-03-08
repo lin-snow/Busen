@@ -21,7 +21,7 @@ type Observation struct {
 	SubscriberID uint64
 }
 
-// Observer receives accepted dispatch observations.
+// Observer receives accepted observations.
 type Observer func(context.Context, Observation)
 
 type observerFilter struct {
@@ -36,7 +36,7 @@ type observerEntry struct {
 	filter observerFilter
 }
 
-// ObserverOption configures a dispatch observer filter.
+// ObserverOption configures an observer filter.
 type ObserverOption interface {
 	applyObserver(*observerFilter) error
 }
@@ -92,7 +92,7 @@ func (b *Bus) UseObserver(observer Observer, opts ...ObserverOption) error {
 		return fmt.Errorf("%w: nil bus", ErrInvalidOption)
 	}
 	if observer == nil {
-		return fmt.Errorf("%w: dispatch observer is nil", ErrInvalidOption)
+		return fmt.Errorf("%w: observer is nil", ErrInvalidOption)
 	}
 	if b.gate.Closed() {
 		return ErrClosed
