@@ -10,10 +10,24 @@
 
 ## 快速概览
 
-- 范围：只做进程内事件分发
-- API 风格：typed-first、泛型发布订阅
-- 扩展能力：topic 路由、中间件、钩子、有界异步投递
-- 并发语义：显式背压策略、可选局部顺序（per subscriber / per key）
+- 定位：小而清晰、typed-first 的进程内事件总线
+- 范围：只做单进程内分发，不做持久化、重放、跨进程投递
+- API 风格：`Subscribe[T]` / `Publish[T]`，默认同步，语义直观
+- 路由能力：支持精确 topic 与轻量通配（`*`、末尾 `>`）
+- 并发控制：`Async()` + `WithBuffer(...)` + `WithOverflow(...)` 显式背压
+- 顺序语义：支持 single-worker FIFO 与 per-subscriber/per-key 局部有序
+- 可观测性：`Hooks` 观测 publish/error/panic/drop/reject
+- 扩展点：`Use(...)` 中间件、`WithMetadata(...)` 元数据、`UseObserver(...)` 桥接观察
+
+## 核心优势与能力
+
+| 优势 | 价值 |
+| --- | --- |
+| typed-first API | `Subscribe[T]` / `Publish[T]` 直接用业务类型，减少样板代码和断言错误 |
+| 显式并发语义 | sync/async、buffer、overflow、keyed ordering 都是可配置且可预期的 |
+| 轻量但可扩展 | 支持 topic、middleware、hooks、metadata、observer，按需开启，不强制框架化 |
+| 观测与排障友好 | 提供 publish/error/panic/drop/reject 生命周期回调，且携带结构化上下文 |
+| 工程边界清晰 | 明确聚焦 in-process，不混入分布式消息平台职责，便于长期维护 |
 
 ## 安装
 
@@ -90,17 +104,6 @@ func main() {
 | 你希望在单个 Go 进程内做 typed event 解耦 | 你需要持久化、重放或跨进程投递 |
 | 你需要轻量 topic 路由和有界异步投递 | 你需要内置 tracing、metrics、retry 或 rate limiting |
 | 你希望保持 API 简洁并显式控制并发语义 | 你需要重型消息平台或分布式能力 |
-
-## 核心能力
-
-- 类型安全发布订阅：`Subscribe[T]` + `Publish[T]`
-- 轻量 topic 路由：支持 `*` 与末尾 `>`
-- 多种订阅方式：按类型、topic、谓词过滤
-- 同步与异步分发：有界队列 + 显式背压策略
-- 局部顺序：支持 single-worker FIFO 与 keyed ordering
-- 运行时可观测：`Hooks` 观测 publish / error / panic / drop / reject
-- 可选统一 metadata：`WithMetadata(...)`、`WithMetadataBuilder(...)`
-- 桥接观察者：`UseObserver(...)` 观察已接受投递
 
 ## Topic 路由
 
